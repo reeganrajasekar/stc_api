@@ -1,0 +1,5 @@
+curl -i -X POST \
+  https://graph.facebook.com/v22.0/410349878830026/messages \
+  -H 'Authorization: Bearer EAHFmcjJKdRsBPsyEk2gyV4m1DfjKp59tJx2s5hTjDETqyxO3qBvvqbAZAeMspmdETrEmLLmerZALGixtW99aP7PYBNj4ueLicLbAjRlBUzcuQVxABpNZCf3Fk5RArtJEW9uX8bDqUvZBYyVcQKHibw2kOU8E0LvIqYPIQ7nUHPasDyks0zjb3QKPE2LlwQZDZD' \
+  -H 'Content-Type: application/json' \
+  -d '{ "messaging_product": "whatsapp", "to": "917094093096", "type": "template", "template": { "name": "hello_world", "language": { "code": "en_US" } } }'

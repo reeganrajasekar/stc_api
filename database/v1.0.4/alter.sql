@@ -1,0 +1,1 @@
+ALTER TABLE device_mappings ADD freeze TINYINT(1) NOT NULL DEFAULT 0 AFTER fingerprint_skip;

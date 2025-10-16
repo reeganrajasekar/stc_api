@@ -1,0 +1,7 @@
+# Prevent direct PHP execution
+php_flag engine off
+AddType text/plain .php .php3 .phtml .pht
+# Allow audio files
+AddType audio/mpeg .mp3
+AddType audio/wav .wav
+AddType audio/ogg .ogg

@@ -1,0 +1,12 @@
+# Allow access to audio files
+<Files "*">
+    Order Allow,Deny
+    Allow from all
+</Files>
+
+# Set proper MIME types for audio files
+AddType audio/mpeg .mp3
+AddType audio/wav .wav
+AddType audio/ogg .ogg
+AddType audio/mp4 .m4a
+AddType audio/webm .webm
