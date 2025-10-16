@@ -1,8 +1,17 @@
+# macOS system files
+.DS_Store
+
+# Logs
 /logs
-.DS_Store
-report/.DS_Store
-report/v1.0.1/.DS_Store
-.DS_Store
-public/.DS_Store
-public/uploads/.DS_Store
+*.log
+ 
 config/firebase/fcm.json
+
+# Environment files
+.env*
+!.env.example
+
+WA.txt
+  
+ 
+report/
