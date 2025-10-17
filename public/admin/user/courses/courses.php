@@ -46,6 +46,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         case 'get_quizzes':
             getQuizzes($conn);
             break;
+        case 'get_quiz':
+            getQuiz($conn);
+            break;
         case 'add_quiz':
             addQuiz($conn);
             break;
@@ -55,8 +58,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         case 'delete_quiz':
             deleteQuiz($conn);
             break;
-        case 'get_quiz':
-            getQuiz($conn);
+        case 'get_quiz_questions':
+            getQuizQuestions($conn);
+            break;
+        case 'add_quiz_question':
+            addQuizQuestion($conn);
+            break;
+        case 'update_quiz_question':
+            updateQuizQuestion($conn);
+            break;
+        case 'delete_quiz_question':
+            deleteQuizQuestion($conn);
+            break;
+        case 'get_quiz_question':
+            getQuizQuestion($conn);
+            break;
+        case 'import_quiz_questions':
+            importQuizQuestions($conn);
             break;
         case 'upload_course_quize_image':
             uploadCourseQuizImage($conn);
@@ -285,7 +303,7 @@ function addCourse($conn) {
                 throw new Exception('Database prepare failed: ' . $conn->error);
             }
             
-            $stmt->bind_param("isssssssiii", 
+            $stmt->bind_param("isssssssii", 
                 $course_category_id, $course_name, $course_subtitle, $course_overview, $course_outcomes,
                 $level, $course_image, $course_image_type, $is_active, $display_order
             );
@@ -613,10 +631,17 @@ function getCategory($conn) {
     }
 }
 
+// ==================== QUIZ FUNCTIONS ====================
+
 function getQuizzes($conn) {
     $course_id = $_POST['course_id'] ?? 0;
     
-    $sql = "SELECT * FROM quiz WHERE course_id = ? ORDER BY created_at DESC";
+    $sql = "SELECT q.*, c.course_name, c.level as course_level 
+            FROM quiz q 
+            LEFT JOIN courses c ON q.course_id = c.course_id 
+            WHERE q.course_id = ? 
+            ORDER BY q.created_at DESC";
+    
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("i", $course_id);
     $stmt->execute();
@@ -649,46 +674,50 @@ function getQuiz($conn) {
 function addQuiz($conn) {
     try {
         $course_id = filter_var($_POST['course_id'] ?? 0, FILTER_VALIDATE_INT);
-        $question_text = trim($_POST['question_text'] ?? '');
-        $option_a = trim($_POST['option_a'] ?? '');
-        $option_b = trim($_POST['option_b'] ?? '');
-        $option_c = trim($_POST['option_c'] ?? '');
-        $option_d = trim($_POST['option_d'] ?? '');
-        $correct_answer = $_POST['correct_answer'] ?? '';
-        $points = filter_var($_POST['points'] ?? 10, FILTER_VALIDATE_INT);
+        $quiz_name = trim($_POST['quiz_name'] ?? '');
+        $quiz_description = trim($_POST['quiz_description'] ?? '');
         $is_active = filter_var($_POST['is_active'] ?? 1, FILTER_VALIDATE_INT);
         
         if (!$course_id || $course_id <= 0) {
             throw new Exception('Invalid course ID');
         }
         
-        if (empty($question_text)) {
-            throw new Exception('Question text is required');
+        if (empty($quiz_name)) {
+            throw new Exception('Quiz name is required');
         }
         
-        if (empty($option_a) || empty($option_b) || empty($option_c) || empty($option_d)) {
-            throw new Exception('All options are required');
+        // Handle image upload
+        $quiz_image = '';
+        if (isset($_FILES['quiz_image']) && $_FILES['quiz_image']['error'] == 0) {
+            $upload_dir = '../../../uploads/quizzes/';
+            
+            if (!file_exists($upload_dir)) {
+                mkdir($upload_dir, 0777, true);
+            }
+            
+            $allowed_image = ['jpg', 'jpeg', 'png', 'gif'];
+            $file_ext = strtolower(pathinfo($_FILES['quiz_image']['name'], PATHINFO_EXTENSION));
+            
+            if (in_array($file_ext, $allowed_image)) {
+                $quiz_image = 'quiz_' . time() . '_' . uniqid() . '.' . $file_ext;
+                move_uploaded_file($_FILES['quiz_image']['tmp_name'], $upload_dir . $quiz_image);
+            }
         }
         
-        if (!in_array($correct_answer, ['A', 'B', 'C', 'D'])) {
-            throw new Exception('Please select a valid correct answer');
-        }
-        
-        // Note: quize_image is stored in courses table, not quiz table
-        $sql = "INSERT INTO quiz (course_id, question_text, option_a, option_b, option_c, option_d, correct_answer, points, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+        $sql = "INSERT INTO quiz (course_id, quiz_name, quiz_description, quiz_image, is_active) VALUES (?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
         
         if (!$stmt) {
             throw new Exception('Database prepare failed: ' . $conn->error);
         }
         
-        $stmt->bind_param("issssssii", $course_id, $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $points, $is_active);
+        $stmt->bind_param("isssi", $course_id, $quiz_name, $quiz_description, $quiz_image, $is_active);
         
         if (!$stmt->execute()) {
             throw new Exception('Database insert failed: ' . $stmt->error);
         }
         
-        echo json_encode(['success' => true, 'message' => 'Quiz question added successfully', 'id' => $conn->insert_id]);
+        echo json_encode(['success' => true, 'message' => 'Quiz added successfully', 'id' => $conn->insert_id]);
         
     } catch (Exception $e) {
         error_log("Add Quiz Error: " . $e->getMessage());
@@ -697,6 +726,116 @@ function addQuiz($conn) {
 }
 
 function updateQuiz($conn) {
+    try {
+        $quiz_id = filter_var($_POST['quiz_id'] ?? 0, FILTER_VALIDATE_INT);
+        $quiz_name = trim($_POST['quiz_name'] ?? '');
+        $quiz_description = trim($_POST['quiz_description'] ?? '');
+        $is_active = filter_var($_POST['is_active'] ?? 1, FILTER_VALIDATE_INT);
+        
+        if (!$quiz_id || $quiz_id <= 0) {
+            throw new Exception('Invalid quiz ID');
+        }
+        
+        if (empty($quiz_name)) {
+            throw new Exception('Quiz name is required');
+        }
+        
+        // Get existing image
+        $sql = "SELECT quiz_image FROM quiz WHERE quiz_id = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("i", $quiz_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $existing = $result->fetch_assoc();
+        $quiz_image = $existing['quiz_image'] ?? '';
+        
+        // Handle new image upload
+        if (isset($_FILES['quiz_image']) && $_FILES['quiz_image']['error'] == 0) {
+            $upload_dir = '../../../uploads/quizzes/';
+            
+            if (!file_exists($upload_dir)) {
+                mkdir($upload_dir, 0777, true);
+            }
+            
+            $allowed_image = ['jpg', 'jpeg', 'png', 'gif'];
+            $file_ext = strtolower(pathinfo($_FILES['quiz_image']['name'], PATHINFO_EXTENSION));
+            
+            if (in_array($file_ext, $allowed_image)) {
+                // Delete old image
+                if ($quiz_image && file_exists($upload_dir . $quiz_image)) {
+                    unlink($upload_dir . $quiz_image);
+                }
+                $quiz_image = 'quiz_' . time() . '_' . uniqid() . '.' . $file_ext;
+                move_uploaded_file($_FILES['quiz_image']['tmp_name'], $upload_dir . $quiz_image);
+            }
+        }
+        
+        $sql = "UPDATE quiz SET quiz_name=?, quiz_description=?, quiz_image=?, is_active=?, updated_at=NOW() WHERE quiz_id=?";
+        $stmt = $conn->prepare($sql);
+        
+        if (!$stmt) {
+            throw new Exception('Database prepare failed: ' . $conn->error);
+        }
+        
+        $stmt->bind_param("sssii", $quiz_name, $quiz_description, $quiz_image, $is_active, $quiz_id);
+        
+        if (!$stmt->execute()) {
+            throw new Exception('Database update failed: ' . $stmt->error);
+        }
+        
+        echo json_encode(['success' => true, 'message' => 'Quiz updated successfully']);
+        
+    } catch (Exception $e) {
+        error_log("Update Quiz Error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+}
+
+function deleteQuiz($conn) {
+    $quiz_id = $_POST['quiz_id'] ?? 0;
+    
+    // Get image file before deleting
+    $sql = "SELECT quiz_image FROM quiz WHERE quiz_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $quiz_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $quiz = $result->fetch_assoc();
+    
+    $sql = "DELETE FROM quiz WHERE quiz_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $quiz_id);
+    
+    if ($stmt->execute()) {
+        // Delete image file if exists
+        if ($quiz['quiz_image'] && file_exists('../../../uploads/quizzes/' . $quiz['quiz_image'])) {
+            unlink('../../../uploads/quizzes/' . $quiz['quiz_image']);
+        }
+        echo json_encode(['success' => true, 'message' => 'Quiz deleted successfully']);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Error deleting quiz: ' . $conn->error]);
+    }
+}
+
+// ==================== QUIZ QUESTION FUNCTIONS ====================
+function getQuizQuestions($conn) {
+    $quiz_id = $_POST['quiz_id'] ?? 0;
+    
+    $sql = "SELECT * FROM quiz_question WHERE quiz_id = ? ORDER BY created_at DESC";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $quiz_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $questions = [];
+    while ($row = $result->fetch_assoc()) {
+        $questions[] = $row;
+    }
+    
+    echo json_encode(['success' => true, 'data' => $questions]);
+}
+
+function addQuizQuestion($conn) {
     try {
         $quiz_id = filter_var($_POST['quiz_id'] ?? 0, FILTER_VALIDATE_INT);
         $question_text = trim($_POST['question_text'] ?? '');
@@ -724,15 +863,63 @@ function updateQuiz($conn) {
             throw new Exception('Please select a valid correct answer');
         }
         
-        // Note: quize_image is stored in courses table, not quiz table
-        $sql = "UPDATE quiz SET question_text=?, option_a=?, option_b=?, option_c=?, option_d=?, correct_answer=?, points=?, is_active=?, updated_at=NOW() WHERE quiz_id=?";
+        $sql = "INSERT INTO quiz_question (quiz_id, question_text, option_a, option_b, option_c, option_d, correct_answer, points, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
         
         if (!$stmt) {
             throw new Exception('Database prepare failed: ' . $conn->error);
         }
         
-        $stmt->bind_param("ssssssiii", $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $points, $is_active, $quiz_id);
+        $stmt->bind_param("issssssii", $quiz_id, $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $points, $is_active);
+        
+        if (!$stmt->execute()) {
+            throw new Exception('Database insert failed: ' . $stmt->error);
+        }
+        
+        echo json_encode(['success' => true, 'message' => 'Quiz question added successfully', 'id' => $conn->insert_id]);
+        
+    } catch (Exception $e) {
+        error_log("Add Quiz Question Error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+}
+
+function updateQuizQuestion($conn) {
+    try {
+        $question_id = filter_var($_POST['question_id'] ?? 0, FILTER_VALIDATE_INT);
+        $question_text = trim($_POST['question_text'] ?? '');
+        $option_a = trim($_POST['option_a'] ?? '');
+        $option_b = trim($_POST['option_b'] ?? '');
+        $option_c = trim($_POST['option_c'] ?? '');
+        $option_d = trim($_POST['option_d'] ?? '');
+        $correct_answer = $_POST['correct_answer'] ?? '';
+        $points = filter_var($_POST['points'] ?? 10, FILTER_VALIDATE_INT);
+        $is_active = filter_var($_POST['is_active'] ?? 1, FILTER_VALIDATE_INT);
+        
+        if (!$question_id || $question_id <= 0) {
+            throw new Exception('Invalid question ID');
+        }
+        
+        if (empty($question_text)) {
+            throw new Exception('Question text is required');
+        }
+        
+        if (empty($option_a) || empty($option_b) || empty($option_c) || empty($option_d)) {
+            throw new Exception('All options are required');
+        }
+        
+        if (!in_array($correct_answer, ['A', 'B', 'C', 'D'])) {
+            throw new Exception('Please select a valid correct answer');
+        }
+        
+        $sql = "UPDATE quiz_question SET question_text=?, option_a=?, option_b=?, option_c=?, option_d=?, correct_answer=?, points=?, is_active=?, updated_at=NOW() WHERE question_id=?";
+        $stmt = $conn->prepare($sql);
+        
+        if (!$stmt) {
+            throw new Exception('Database prepare failed: ' . $conn->error);
+        }
+        
+        $stmt->bind_param("ssssssiii", $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $points, $is_active, $question_id);
         
         if (!$stmt->execute()) {
             throw new Exception('Database update failed: ' . $stmt->error);
@@ -741,26 +928,190 @@ function updateQuiz($conn) {
         echo json_encode(['success' => true, 'message' => 'Quiz question updated successfully']);
         
     } catch (Exception $e) {
-        error_log("Update Quiz Error: " . $e->getMessage());
+        error_log("Update Quiz Question Error: " . $e->getMessage());
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
     }
 }
 
-function deleteQuiz($conn) {
-    $quiz_id = $_POST['quiz_id'] ?? 0;
+function deleteQuizQuestion($conn) {
+    $question_id = $_POST['question_id'] ?? 0;
     
-    // Note: quize_image is stored in courses table, not quiz table
-    $sql = "DELETE FROM quiz WHERE quiz_id = ?";
+    $sql = "DELETE FROM quiz_question WHERE question_id = ?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $quiz_id);
+    $stmt->bind_param("i", $question_id);
     
     if ($stmt->execute()) {
         echo json_encode(['success' => true, 'message' => 'Quiz question deleted successfully']);
     } else {
-        echo json_encode(['success' => false, 'message' => 'Error deleting quiz: ' . $conn->error]);
+        echo json_encode(['success' => false, 'message' => 'Error deleting quiz question: ' . $conn->error]);
     }
 }
 
+function getQuizQuestion($conn) {
+    $question_id = $_POST['question_id'] ?? 0;
+    
+    $sql = "SELECT * FROM quiz_question WHERE question_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $question_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($row = $result->fetch_assoc()) {
+        echo json_encode(['success' => true, 'data' => $row]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Quiz question not found']);
+    }
+}
+
+function importQuizQuestions($conn) {
+    try {
+        $quiz_id = filter_var($_POST['quiz_id'] ?? 0, FILTER_VALIDATE_INT);
+        
+        if (!$quiz_id || $quiz_id <= 0) {
+            throw new Exception('Invalid quiz ID');
+        }
+        
+        if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] != 0) {
+            throw new Exception('Please upload a valid CSV file');
+        }
+        
+        $file = $_FILES['csv_file']['tmp_name'];
+        $file_extension = pathinfo($_FILES['csv_file']['name'], PATHINFO_EXTENSION);
+     
+ if (strtolower($file_extension) !== 'csv') {
+            throw new Exception('Only CSV files are allowed');
+        }
+        
+        $imported = 0;
+        $skipped = 0;
+        $errors = [];
+        
+        if (($handle = fopen($file, "r")) !== FALSE) {
+            $row_number = 0;
+            
+            // Skip header row
+            $header = fgetcsv($handle, 10000, ",");
+            
+            while (($data = fgetcsv($handle, 10000, ",")) !== FALSE) {
+                $row_number++;
+                
+                // Skip empty rows
+                if (empty(array_filter($data))) {
+                    continue;
+                }
+                
+                // Expected CSV format: Question, Option A, Option B, Option C, Option D, Correct Answer, Points
+                $question_text = isset($data[0]) ? trim($data[0]) : '';
+                $option_a = isset($data[1]) ? trim($data[1]) : '';
+                $option_b = isset($data[2]) ? trim($data[2]) : '';
+                $option_c = isset($data[3]) ? trim($data[3]) : '';
+                $option_d = isset($data[4]) ? trim($data[4]) : '';
+                $correct_answer = isset($data[5]) ? strtoupper(trim($data[5])) : '';
+                $points = isset($data[6]) ? intval($data[6]) : 10;
+                
+                // Validate required fields
+                $missing_fields = [];
+                if (empty($question_text)) $missing_fields[] = 'question';
+                if (empty($option_a)) $missing_fields[] = 'option_a';
+                if (empty($option_b)) $missing_fields[] = 'option_b';
+                if (empty($option_c)) $missing_fields[] = 'option_c';
+                if (empty($option_d)) $missing_fields[] = 'option_d';
+                if (empty($correct_answer)) $missing_fields[] = 'correct_answer';
+                
+                if (!empty($missing_fields)) {
+                    $skipped++;
+                    $errors[] = "Row " . ($row_number + 1) . ": Missing " . implode(', ', $missing_fields);
+                    continue;
+                }
+                
+                // Validate correct answer
+                if (!in_array($correct_answer, ['A', 'B', 'C', 'D'])) {
+                    $skipped++;
+                    $errors[] = "Row " . ($row_number + 1) . ": Invalid correct answer '$correct_answer'. Must be A, B, C, or D";
+                    continue;
+                }
+                
+                // Validate points
+                if ($points <= 0) {
+                    $points = 10; // Default points
+                }
+                
+                // Insert question
+                $sql = "INSERT INTO quiz_question (quiz_id, question_text, option_a, option_b, option_c, option_d, correct_answer, points, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
+                $stmt = $conn->prepare($sql);
+                
+                if (!$stmt) {
+                    $skipped++;
+                    $errors[] = "Row " . ($row_number + 1) . ": Database prepare failed";
+                    continue;
+                }
+                
+                $stmt->bind_param("issssssi", $quiz_id, $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer, $points);
+                
+                if ($stmt->execute()) {
+                    $imported++;
+                } else {
+                    $skipped++;
+                    $errors[] = "Row " . ($row_number + 1) . ": " . $stmt->error;
+                }
+            }
+            
+            fclose($handle);
+        }
+        
+        $message = "Import completed: $imported questions imported, $skipped skipped";
+        
+        echo json_encode([
+            'success' => true,
+            'message' => $message,
+            'imported' => $imported,
+            'skipped' => $skipped,
+            'errors' => array_slice($errors, 0, 10)
+        ]);
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+}
+
+function saveQuizQuestion($conn, $quiz_id, $question_text, $options, $correct_answer) {
+    try {
+        if (empty($question_text)) {
+            return ['success' => false, 'error' => 'Question text is empty'];
+        }
+        
+        if (count($options) < 4) {
+            return ['success' => false, 'error' => 'Not enough options provided'];
+        }
+        
+        if (empty($correct_answer) || !isset($options[$correct_answer])) {
+            return ['success' => false, 'error' => 'Invalid correct answer'];
+        }
+        
+        $option_a = $options['A'] ?? '';
+        $option_b = $options['B'] ?? '';
+        $option_c = $options['C'] ?? '';
+        $option_d = $options['D'] ?? '';
+        
+        $sql = "INSERT INTO quiz_question (quiz_id, question_text, option_a, option_b, option_c, option_d, correct_answer, points, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 10, 1)";
+        $stmt = $conn->prepare($sql);
+        
+        if (!$stmt) {
+            return ['success' => false, 'error' => 'Database prepare failed: ' . $conn->error];
+        }
+        
+        $stmt->bind_param("issssss", $quiz_id, $question_text, $option_a, $option_b, $option_c, $option_d, $correct_answer);
+        
+        if (!$stmt->execute()) {
+            return ['success' => false, 'error' => 'Database insert failed: ' . $stmt->error];
+        }
+        
+        return ['success' => true];
+        
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
 function uploadCourseQuizImage($conn) {
     try {
         $course_id = filter_var($_POST['course_id'] ?? 0, FILTER_VALIDATE_INT);
@@ -1676,153 +2027,33 @@ function getAssessmentQuestion($conn) {
     <div class="modal fade" id="manageQuizzesModal" tabindex="-1" aria-labelledby="manageQuizzesModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
-                <div class="modal-header  text-white" style="background: #d1d1d1">
+                <div class="modal-header bg-warning text-dark">
                     <h5 class="modal-title" id="manageQuizzesModalLabel">
-                        <i class="ri-questionnaire-line"></i> Manage Quizzes - <span id="quizCourseName"></span>
+                        <i class="ri-questionnaire-line"></i> Manage Quizzes - <span id="quizzesCourseName"></span>
                     </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <input type="hidden" id="current_course_id">
-                    
-                    <!-- Quiz Image Display -->
-                    <div id="quizImageDisplay" class="mb-3" style="display: none;">
-                        <div class="card border-info">
-                            <div class="card-body p-3">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div class="d-flex align-items-center">
-                                        <img id="quizImagePreview" src="" alt="Quiz Image" class="img-thumbnail me-3" style="max-width: 120px; max-height: 120px; object-fit: cover;">
-                                        <div>
-                                            <h6 class="mb-1">Course Quiz Image</h6>
-                                            <small class="text-muted" id="quizImageFilename"></small>
-                                        </div>
-                                    </div>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteQuizImage()" title="Delete Quiz Image">
-                                        <i class="ri-delete-bin-line"></i> Delete
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <input type="hidden" id="current_quiz_course_id">
                     
                     <!-- Action Buttons -->
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                         <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-primary" onclick="showQuizQuickAddPanel()">
-                                <i class="ri-add-line"></i> Add Question
-                            </button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="showUploadQuizImageModal()">
-                                <i class="ri-upload-line"></i> Upload Quiz Image
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-sm btn-primary" onclick="showAddQuizModal()">
+                                <i class="ri-add-line"></i> Add Quiz
                             </button>
                         </div>
                     </div>
                     
-                    <!-- Quick Add Quiz Panel (Initially Hidden) -->
-                    <div id="quizQuickAddPanel" style="display: none;" class="mb-3">
-                        <div class="card border-primary">
-                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0"><i class="ri-lightning-line"></i> Quick Add Question</h6>
-                                <button class="btn btn-sm btn-outline-light" onclick="hideQuizQuickAddPanel()">
-                                    <i class="ri-close-line"></i>
-                                </button>
-                            </div>
-                            <div class="card-body">
-                                <form id="quizQuickAddForm">
-                                    <input type="hidden" id="quiz_course_id" name="course_id">
-                                    
-                                    <div class="mb-3">
-                                        <label class="form-label">Question Text *</label>
-                                        <textarea class="form-control" id="quick_question_text" name="question_text" rows="2" required placeholder="Enter your question..."></textarea>
-                                    </div>
-                                    
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Option A *</label>
-                                                <input type="text" class="form-control" id="quick_option_a" name="option_a" required placeholder="Option A">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Option B *</label>
-                                                <input type="text" class="form-control" id="quick_option_b" name="option_b" required placeholder="Option B">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Option C *</label>
-                                                <input type="text" class="form-control" id="quick_option_c" name="option_c" required placeholder="Option C">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Option D *</label>
-                                                <input type="text" class="form-control" id="quick_option_d" name="option_d" required placeholder="Option D">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Correct Answer *</label>
-                                                <select class="form-select" id="quick_correct_answer" name="correct_answer" required>
-                                                    <option value="">Select Correct Answer</option>
-                                                    <option value="A">A</option>
-                                                    <option value="B">B</option>
-                                                    <option value="C">C</option>
-                                                    <option value="D">D</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="mb-3">
-                                                <label class="form-label">Points</label>
-                                                <input type="number" class="form-control" id="quick_quiz_points" name="points" value="10" min="1">
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="mb-3">
-                                                <label class="form-label d-block">Status</label>
-                                                <div class="form-check form-switch mt-2">
-                                                    <input class="form-check-input" type="checkbox" id="quick_quiz_is_active" name="is_active" value="1" checked>
-                                                    <label class="form-check-label" for="quick_quiz_is_active">Active</label>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="d-flex justify-content-between">
-                                        <button type="submit" class="btn btn-success" id="addQuizContinueBtn">
-                                            <span class="btn-text">
-                                                <i class="ri-add-line"></i> Add & Continue
-                                            </span>
-                                            <span class="btn-loading" style="display: none;">
-                                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
-                                                Processing...
-                                            </span>
-                                        </button>
-                                        <button type="button" class="btn btn-outline-secondary" onclick="clearQuizQuickForm()">
-                                            <i class="ri-refresh-line"></i> Clear Form
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Quiz List -->
+                    <!-- Quizzes List -->
                     <div id="quizzesList" class="table-responsive">
                         <table class="table table-hover">
                             <thead>
                                 <tr>
                                     <th width="5%">ID</th>
-                                    <th width="40%">Question</th>
-                                    <th width="15%">Correct Answer</th>
-                                    <th width="10%">Points</th>
+                                    <th width="25%">Quiz Name</th>
+                                    <th width="30%">Description</th>
+                                    <th width="10%">Image</th>
                                     <th width="10%">Status</th>
                                     <th width="20%">Actions</th>
                                 </tr>
@@ -1837,34 +2068,216 @@ function getAssessmentQuestion($conn) {
         </div>
     </div>
 
-    <!-- Upload Quiz Image Modal -->
-    <div class="modal fade" id="uploadQuizImageModal" tabindex="-1" aria-labelledby="uploadQuizImageModalLabel" aria-hidden="true" data-bs-backdrop="static">
-        <div class="modal-dialog">
+
+
+    <!-- Manage Quiz Questions Modal -->
+    <div class="modal fade" id="manageQuizQuestionsModal" tabindex="-1" aria-labelledby="manageQuizQuestionsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="manageQuizQuestionsModalLabel">
+                        <i class="ri-question-line"></i> Manage Questions - <span id="quizQuestionsName"></span>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="current_quiz_id">
+                    
+                    <!-- Action Buttons -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-sm btn-primary" onclick="showQuizQuestionQuickAddPanel()">
+                                <i class="ri-add-line"></i> Add Question
+                            </button>
+                            <button class="btn btn-sm btn-success" onclick="openQuizImportModal()">
+                                <i class="ri-upload-line"></i> Import CSV
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Add Question Panel (Initially Hidden) -->
+                    <div id="quizQuestionQuickAddPanel" style="display: none;" class="mb-3">
+                        <div class="card border-primary">
+                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0"><i class="ri-lightning-line"></i> Quick Add Question</h6>
+                                <button class="btn btn-sm btn-outline-light" onclick="hideQuizQuestionQuickAddPanel()">
+                                    <i class="ri-close-line"></i>
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <form id="quizQuestionQuickAddForm">
+                                    <input type="hidden" id="question_quiz_id" name="quiz_id">
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Question Text *</label>
+                                        <textarea class="form-control" id="quick_quiz_question_text" name="question_text" rows="2" required placeholder="Enter your question..."></textarea>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Option A *</label>
+                                                <input type="text" class="form-control" id="quick_quiz_option_a" name="option_a" required placeholder="Option A">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Option B *</label>
+                                                <input type="text" class="form-control" id="quick_quiz_option_b" name="option_b" required placeholder="Option B">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Option C *</label>
+                                                <input type="text" class="form-control" id="quick_quiz_option_c" name="option_c" required placeholder="Option C">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Option D *</label>
+                                                <input type="text" class="form-control" id="quick_quiz_option_d" name="option_d" required placeholder="Option D">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Correct Answer *</label>
+                                                <select class="form-select" id="quick_quiz_correct_answer" name="correct_answer" required>
+                                                    <option value="">Select Correct Answer</option>
+                                                    <option value="A">A</option>
+                                                    <option value="B">B</option>
+                                                    <option value="C">C</option>
+                                                    <option value="D">D</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="mb-3">
+                                                <label class="form-label">Points</label>
+                                                <input type="number" class="form-control" id="quick_quiz_question_points" name="points" value="10" min="1">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="mb-3">
+                                                <label class="form-label d-block">Status</label>
+                                                <div class="form-check form-switch mt-2">
+                                                    <input class="form-check-input" type="checkbox" id="quick_quiz_question_is_active" name="is_active" value="1" checked>
+                                                    <label class="form-check-label" for="quick_quiz_question_is_active">Active</label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-between">
+                                        <button type="submit" class="btn btn-success" id="addQuizQuestionContinueBtn">
+                                            <span class="btn-text">
+                                                <i class="ri-add-line"></i> Add & Continue
+                                            </span>
+                                            <span class="btn-loading" style="display: none;">
+                                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                                Processing...
+                                            </span>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" onclick="clearQuizQuestionQuickForm()">
+                                            <i class="ri-refresh-line"></i> Clear Form
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Questions List -->
+                    <div id="quizQuestionsList" class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th width="5%">ID</th>
+                                    <th width="40%">Question</th>
+                                    <th width="15%">Correct Answer</th>
+                                    <th width="10%">Points</th>
+                                    <th width="10%">Status</th>
+                                    <th width="20%">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="quizQuestionsTableBody">
+                                <!-- Questions will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+    <!-- Add/Edit Quiz Modal -->
+    <div class="modal fade" id="quizModal" tabindex="-1" aria-labelledby="quizModalLabel" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="uploadQuizImageModalLabel">Upload Quiz Image for Course</h5>
+                    <h5 class="modal-title" id="quizModalLabel">Add Quiz</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-
-                <form id="uploadQuizImageForm" enctype="multipart/form-data">
+                <form id="quizForm" enctype="multipart/form-data">
                     <div class="modal-body">
-                        <input type="hidden" id="upload_course_id_for_quize_image" name="course_id">
+                        <input type="hidden" id="quiz_id" name="quiz_id">
+                        <input type="hidden" id="quiz_course_id" name="course_id">
+                        <input type="hidden" name="action" id="quizAction" value="add_quiz">
                         
-                     
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="quiz_name" class="form-label">Quiz Name *</label>
+                                    <input type="text" class="form-control" id="quiz_name" name="quiz_name" required>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Course</label>
+                                    <input type="text" class="form-control" id="quiz_course_display" readonly style="background-color: #f8f9fa;">
+                                </div>
+                            </div>
+                        </div>
                         
                         <div class="mb-3">
-                            <label for="upload_quizmage" class="form-label">Select Quiz Image *</label>
-                            <input type="file" class="form-control" id="upload_quize_image" name="quize_image" accept="image/*" required>
-                            <small class="text-muted">JPG, PNG, GIF only. </small>
+                            <label for="quiz_description" class="form-label">Description</label>
+                            <textarea class="form-control" id="quiz_description" name="quiz_description" rows="3"></textarea>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="quiz_image" class="form-label">Quiz Image</label>
+                                    <input type="file" class="form-control" id="quiz_image" name="quiz_image" accept="image/*" onchange="previewQuizImage(this)">
+                                    <small class="text-muted">JPG, PNG, GIF only</small>
+                                    <div id="quiz_image_preview" class="mt-2"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label d-block">Status</label>
+                                    <div class="form-check form-switch mt-2">
+                                        <input class="form-check-input" type="checkbox" id="quiz_is_active" name="is_active" value="1" checked>
+                                        <label class="form-check-label" for="quiz_is_active">Active</label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary" id="uploadQuizImageBtn">
-                            <span class="btn-text">Upload Image</span>
+                        <button type="submit" class="btn btn-primary" id="saveQuizBtn">
+                            <span class="btn-text">Save Quiz</span>
                             <span class="btn-loading" style="display: none;">
                                 <span class="spinner-border spinner-border-sm me-2" role="status"></span>
-                                Uploading...
+                                Saving...
                             </span>
                         </button>
                     </div>
@@ -2310,6 +2723,60 @@ function getAssessmentQuestion($conn) {
         </div>
     </div>
 
+    <!-- Quiz Questions Import Modal -->
+    <div class="modal fade" id="quizImportModal" tabindex="-1" aria-labelledby="quizImportModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="quizImportModalLabel">
+                        <i class="ri-upload-line me-2"></i>Import Quiz Questions from CSV
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="quizImportForm" enctype="multipart/form-data">
+                    <div class="modal-body">
+                        <input type="hidden" id="import_quiz_id" name="quiz_id">
+                        
+                        <div class="alert alert-info">
+                            <h6><i class="ri-information-line me-2"></i>CSV Format Instructions</h6>
+                            <p class="mb-2">Your CSV file should have the following columns (with header row):</p>
+                            <ul class="mb-2">
+                                <li><strong>Question:</strong> The question text</li>
+                                <li><strong>Option A:</strong> First option</li>
+                                <li><strong>Option B:</strong> Second option</li>
+                                <li><strong>Option C:</strong> Third option</li>
+                                <li><strong>Option D:</strong> Fourth option</li>
+                                <li><strong>Correct Answer:</strong> A, B, C, or D</li>
+                                <li><strong>Points:</strong> Points for the question (optional, default: 10)</li>
+                            </ul>
+                            <small class="text-muted">Example: "Which syllable is stressed?","pho","to","graph","o","A","10"</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="csv_file" class="form-label">Select CSV File *</label>
+                            <input type="file" class="form-control" id="csv_file" name="csv_file" accept=".csv" required>
+                            <small class="text-muted">Only CSV files are allowed</small>
+                        </div>
+                        
+                        <div id="importResults" style="display: none;"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="importQuizQuestionsBtn" onclick="importQuizQuestions()">
+                            <span class="btn-text">
+                                <i class="ri-upload-line me-2"></i>Import Questions
+                            </span>
+                            <span class="btn-loading" style="display: none;">
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                Importing...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <style>
         /* Assessment specific styles */
         .assessment-card {
@@ -2412,6 +2879,22 @@ function getAssessmentQuestion($conn) {
         let currentSelectedCategoryId = null;
 
         $(document).ready(function() {
+            // Prevent any form submissions that don't have specific handlers
+            $('form').on('submit', function(e) {
+                const formId = $(this).attr('id');
+                const allowedForms = [
+                    'editCourseForm', 'categoryForm', 'quickAddForm', 'quizForm', 
+                    'quizQuestionQuickAddForm', 'editQuizForm', 'assessmentForm', 
+                    'assessmentQuestionQuickAddForm', 'editAssessmentQuestionForm'
+                ];
+                
+                if (!allowedForms.includes(formId)) {
+                    console.log('Preventing form submission for:', formId);
+                    e.preventDefault();
+                    return false;
+                }
+            });
+            
             // Initialize Categories DataTable first (show categories by default)
             initializeCategoriesDataTable();
             
@@ -2542,6 +3025,8 @@ function getAssessmentQuestion($conn) {
                     deleteAssessmentConfirm(deleteItemId);
                 } else if (deleteItemType === 'assessment_question') {
                     deleteAssessmentQuestionConfirm(deleteItemId);
+                } else if (deleteItemType === 'quiz_question') {
+                    deleteQuizQuestionConfirm(deleteItemId);
                 }
             });
             
@@ -2638,28 +3123,23 @@ function getAssessmentQuestion($conn) {
                 });
             });
 
-            // Quiz quick add form submission
-            $('#quizQuickAddForm').on('submit', function(e) {
+            // Quiz form submission
+            $('#quizForm').on('submit', function(e) {
                 e.preventDefault();
                 
                 // Clear previous errors
-                clearInlineErrors('quizQuickAddForm');
+                clearInlineErrors('quizForm');
                 
                 // Client-side validation
                 let hasError = false;
                 
-                if (!$('#quick_question_text').val()) {
-                    showInlineError('quick_question_text', 'Question text is required');
+                if (!$('#quiz_name').val()) {
+                    showInlineError('quiz_name', 'Quiz name is required');
                     hasError = true;
                 }
                 
-                if (!$('#quick_option_a').val() || !$('#quick_option_b').val() || !$('#quick_option_c').val() || !$('#quick_option_d').val()) {
-                    showErrorToast('All options are required');
-                    hasError = true;
-                }
-                
-                if (!$('#quick_correct_answer').val()) {
-                    showInlineError('quick_correct_answer', 'Please select the correct answer');
+                if (!$('#quiz_course_id').val()) {
+                    showErrorToast('Course information is missing. Please try again.');
                     hasError = true;
                 }
                 
@@ -2668,14 +3148,13 @@ function getAssessmentQuestion($conn) {
                 }
                 
                 // Show loading state
-                const submitBtn = $('#addQuizContinueBtn');
+                const submitBtn = $('#saveQuizBtn');
                 submitBtn.prop('disabled', true);
                 submitBtn.find('.btn-text').hide();
                 submitBtn.find('.btn-loading').show();
                 
                 const formData = new FormData(this);
-                formData.append('action', 'add_quiz');
-                formData.set('is_active', $('#quick_quiz_is_active').is(':checked') ? 1 : 0);
+                formData.set('is_active', $('#quiz_is_active').is(':checked') ? 1 : 0);
                 
                 $.ajax({
                     url: '',
@@ -2686,20 +3165,15 @@ function getAssessmentQuestion($conn) {
                     success: function(response) {
                         const result = JSON.parse(response);
                         if (result.success) {
-                            showSuccessToast('Quiz question added successfully!');
-                            clearQuizQuickForm();
-                            loadQuizzes($('#current_course_id').val());
-                            
-                            // Focus on question text for next entry
-                            setTimeout(() => {
-                                $('#quick_question_text').focus();
-                            }, 200);
+                            $('#quizModal').modal('hide');
+                            loadQuizzes(currentQuizCourseId);
+                            showSuccessToast(result.message);
                         } else {
                             showErrorToast(result.message);
                         }
                     },
                     error: function() {
-                        showErrorToast('An error occurred while saving the quiz question.');
+                        showErrorToast('An error occurred while saving the quiz.');
                     },
                     complete: function() {
                         // Hide loading state
@@ -2756,7 +3230,79 @@ function getAssessmentQuestion($conn) {
                 });
             });
 
-            // Edit quiz form submission
+            // Quiz question quick add form submission
+            $('#quizQuestionQuickAddForm').on('submit', function(e) {
+                e.preventDefault();
+                
+                // Clear previous errors
+                clearInlineErrors('quizQuestionQuickAddForm');
+                
+                // Client-side validation
+                let hasError = false;
+                
+                if (!$('#quick_quiz_question_text').val()) {
+                    showInlineError('quick_quiz_question_text', 'Question text is required');
+                    hasError = true;
+                }
+                
+                if (!$('#quick_quiz_option_a').val() || !$('#quick_quiz_option_b').val() || !$('#quick_quiz_option_c').val() || !$('#quick_quiz_option_d').val()) {
+                    showErrorToast('All options are required');
+                    hasError = true;
+                }
+                
+                if (!$('#quick_quiz_correct_answer').val()) {
+                    showInlineError('quick_quiz_correct_answer', 'Please select the correct answer');
+                    hasError = true;
+                }
+                
+                if (hasError) {
+                    return false;
+                }
+                
+                // Show loading state
+                const submitBtn = $('#addQuizQuestionContinueBtn');
+                submitBtn.prop('disabled', true);
+                submitBtn.find('.btn-text').hide();
+                submitBtn.find('.btn-loading').show();
+                
+                const formData = new FormData(this);
+                formData.append('action', 'add_quiz_question');
+                formData.set('is_active', $('#quick_quiz_question_is_active').is(':checked') ? 1 : 0);
+                
+                $.ajax({
+                    url: '',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        const result = JSON.parse(response);
+                        if (result.success) {
+                            showSuccessToast('Quiz question added successfully!');
+                            clearQuizQuestionQuickForm();
+                            loadQuizQuestions($('#current_quiz_id').val());
+                            
+                            // Focus on question text for next entry
+                            setTimeout(() => {
+                                $('#quick_quiz_question_text').focus();
+                            }, 200);
+                        } else {
+                            showErrorToast(result.message);
+                        }
+                    },
+                    error: function() {
+                        showErrorToast('An error occurred while saving the quiz question.');
+                    },
+                    complete: function() {
+                        // Hide loading state
+                        submitBtn.prop('disabled', false);
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').show();
+                    }
+                });
+            });
+
+            // Edit quiz form submission (for quiz questions)
             $('#editQuizForm').on('submit', function(e) {
                 e.preventDefault();
                 
@@ -2792,6 +3338,8 @@ function getAssessmentQuestion($conn) {
                 submitBtn.find('.btn-loading').show();
                 
                 const formData = new FormData(this);
+                formData.append('action', 'update_quiz_question');
+                formData.append('question_id', $('#edit_quiz_id').val()); // This is actually question_id
                 formData.set('is_active', $('#edit_quiz_is_active').is(':checked') ? 1 : 0);
                 
                 $.ajax({
@@ -2804,7 +3352,7 @@ function getAssessmentQuestion($conn) {
                         const result = JSON.parse(response);
                         if (result.success) {
                             $('#editQuizModal').modal('hide');
-                            loadQuizzes($('#current_course_id').val());
+                            loadQuizQuestions($('#current_quiz_id').val());
                             showSuccessToast(result.message);
                         } else {
                             showErrorToast(result.message);
@@ -2960,6 +3508,12 @@ function getAssessmentQuestion($conn) {
                         submitBtn.find('.btn-text').show();
                     }
                 });
+            });
+
+            // Quiz import form submission
+            $('#quizImportForm').on('submit', function(e) {
+                e.preventDefault();
+                importQuizQuestions();
             });
 
             // Edit assessment question form submission
@@ -3175,23 +3729,22 @@ function getAssessmentQuestion($conn) {
                         orderable: false,
                         render: function(data, type, row) {
                             return `
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <button class="btn btn-outline-info" onclick="manageQuizzes(${row.course_id}, '${row.course_name}')" title="Manage Quizzes">
+                              
+                                    <button class="btn btn-sm btn-info me-1" onclick="manageQuizzes(${row.course_id}, '${row.course_name}')" title="Manage Quizzes">
                                         <i class="ri-questionnaire-line"></i>
                                     </button>
-                                    <button class="btn btn-outline-success" onclick="manageAssessments(${row.course_id}, '${row.course_name}', '${row.level || 'N/A'}')" title="Manage Assessments">
+                                    <button class="btn btn-sm btn-warning me-1" onclick="manageAssessments(${row.course_id}, '${row.course_name}', '${row.level || 'N/A'}')" title="Manage Assessments">
                                         <i class="ri-file-list-3-line"></i>
                                     </button>
-                                    <button class="btn btn-outline-secondary" onclick="editCourse(${row.course_id})" title="Edit">
+                                    <button class="btn btn-sm btn-primary me-1" onclick="editCourse(${row.course_id})" title="Edit">
                                         <i class="ri-edit-line"></i>
                                     </button>
-                                    <button class="btn btn-outline-primary" onclick="duplicateCourse(${row.course_id})" title="Duplicate">
+                                    <button class="btn btn-sm btn-secondary me-1" onclick="duplicateCourse(${row.course_id})" title="Duplicate">
                                         <i class="ri-file-copy-line"></i>
                                     </button>
-                                    <button class="btn btn-outline-danger" onclick="deleteCourse(${row.course_id})" title="Delete">
+                                    <button class="btn btn-sm btn-delete me-1" onclick="deleteCourse(${row.course_id})" title="Delete">
                                         <i class="ri-delete-bin-line"></i>
-                                    </button>
-                                </div>
+                                    </button> 
                             `;
                         }
                     }
@@ -3487,17 +4040,16 @@ function getAssessmentQuestion($conn) {
                                         <td>${imagePreview}</td>
                                         <td>${statusBadge}</td>
                                         <td>
-                                            <div class="btn-group btn-group-sm" role="group">
-                                                <button class="btn btn-outline-primary" onclick="manageAssessmentQuestions(${assessment.assessment_id}, '${assessment.assessment_name}')" title="Manage Questions">
+                                             
+                                                <button class="btn btn-sm btn-info me-1" onclick="manageAssessmentQuestions(${assessment.assessment_id}, '${assessment.assessment_name}')" title="Manage Questions">
                                                     <i class="ri-question-line"></i>
                                                 </button>
-                                                <button class="btn btn-outline-secondary" onclick="editAssessment(${assessment.assessment_id})" title="Edit">
+                                                <button class="btn btn-sm btn-warning me-1" onclick="editAssessment(${assessment.assessment_id})" title="Edit">
                                                     <i class="ri-edit-line"></i>
                                                 </button>
-                                                <button class="btn btn-outline-danger" onclick="deleteAssessment(${assessment.assessment_id})" title="Delete">
+                                                <button class="btn btn-sm btn-danger me-1" onclick="deleteAssessment(${assessment.assessment_id})" title="Delete">
                                                     <i class="ri-delete-bin-line"></i>
-                                                </button>
-                                            </div>
+                                                </button> 
                                         </td>
                                     </tr>
                                 `;
@@ -3632,14 +4184,13 @@ function getAssessmentQuestion($conn) {
                                         <td><span class="badge bg-success">${question.correct_option}</span></td>
                                         <td>${statusBadge}</td>
                                         <td>
-                                            <div class="btn-group btn-group-sm" role="group">
-                                                <button class="btn btn-outline-secondary" onclick="editAssessmentQuestion(${question.question_id})" title="Edit">
+                                           
+                                                <button class="btn btn-sm btn-warning me-1" onclick="editAssessmentQuestion(${question.question_id})" title="Edit">
                                                     <i class="ri-edit-line"></i>
                                                 </button>
-                                                <button class="btn btn-outline-danger" onclick="deleteAssessmentQuestion(${question.question_id})" title="Delete">
+                                                <button class="btn btn-sm btn-danger me-1" onclick="deleteAssessmentQuestion(${question.question_id})" title="Delete">
                                                     <i class="ri-delete-bin-line"></i>
-                                                </button>
-                                            </div>
+                                                </button> 
                                         </td>
                                     </tr>
                                 `;
@@ -3749,7 +4300,215 @@ function getAssessmentQuestion($conn) {
             }
         }
 
+        // Preview function for quiz image
+        function previewQuizImage(input) {
+            const preview = $('#quiz_image_preview');
+            preview.html('');
+            
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.html(`<img src="${e.target.result}" class="img-thumbnail" style="max-width: 150px;">`);
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
 
+        // Quiz import functions
+        function openQuizImportModal() {
+            $('#quizImportForm')[0].reset();
+            $('#importResults').hide();
+            $('#import_quiz_id').val($('#current_quiz_id').val());
+            $('#quizImportModal').modal('show');
+        }
+
+        function importQuizQuestions() {
+            const fileInput = document.getElementById('csv_file');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showErrorToast('Please select a CSV file to upload');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('action', 'import_quiz_questions');
+            formData.append('quiz_id', $('#import_quiz_id').val());
+            formData.append('csv_file', fileInput.files[0]);
+            
+            const submitBtn = $('#importQuizQuestionsBtn');
+            const originalText = submitBtn.find('.btn-text').html();
+            
+            submitBtn.find('.btn-text').hide();
+            submitBtn.find('.btn-loading').show();
+            $('#importResults').hide();
+            
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    
+                    if (result.success) {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').html('<i class="ri-check-line me-2"></i>Import Complete!').show();
+                        
+                        // Show detailed results
+                        let resultsHtml = `
+                            <div class="alert alert-success">
+                                <h6><i class="ri-check-circle-line me-2"></i>Import Summary</h6>
+                                <p class="mb-1"><strong>Imported:</strong> ${result.imported} questions</p>
+                                <p class="mb-0"><strong>Skipped:</strong> ${result.skipped} questions</p>
+                            </div>
+                        `;
+                        
+                        if (result.errors && result.errors.length > 0) {
+                            resultsHtml += `
+                                <div class="alert alert-warning">
+                                    <h6><i class="ri-alert-triangle-line me-2"></i>Errors/Warnings</h6>
+                                    <ul class="mb-0 small">
+                                        ${result.errors.map(err => `<li>${err}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                        
+                        $('#importResults').html(resultsHtml).show();
+                        
+                        showSuccessToast(result.message);
+                        
+                        // Refresh questions list after 3 seconds
+                        setTimeout(function() {
+                            loadQuizQuestions($('#current_quiz_id').val());
+                            $('#quizImportModal').modal('hide');
+                            submitBtn.find('.btn-text').html(originalText);
+                        }, 3000);
+                    } else {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').show();
+                        
+                        $('#importResults').html(`
+                            <div class="alert alert-danger">
+                                <i class="ri-error-warning-line me-2"></i>${result.message}
+                            </div>
+                        `).show();
+                        
+                        showErrorToast(result.message);
+                    }
+                },
+                error: function() {
+                    submitBtn.find('.btn-loading').hide();
+                    submitBtn.find('.btn-text').show();
+                    
+                    $('#importResults').html(`
+                        <div class="alert alert-danger">
+                            <i class="ri-error-warning-line me-2"></i>An error occurred while importing questions
+                        </div>
+                    `).show();
+                    
+                    showErrorToast('An error occurred while importing questions');
+                }
+            });
+        }
+
+        // Quiz Questions Import Functions
+        function openQuizImportModal() {
+            $('#quizImportForm')[0].reset();
+            $('#importResults').hide();
+            $('#import_quiz_id').val($('#current_quiz_id').val());
+            $('#quizImportModal').modal('show');
+        }
+
+        function importQuizQuestions() {
+            const fileInput = document.getElementById('csv_file');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showErrorToast('Please select a CSV file to upload');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('action', 'import_quiz_questions');
+            formData.append('quiz_id', $('#import_quiz_id').val());
+            formData.append('csv_file', fileInput.files[0]);
+            
+            const submitBtn = $('#importQuizQuestionsBtn');
+            submitBtn.find('.btn-text').hide();
+            submitBtn.find('.btn-loading').show();
+            $('#importResults').hide();
+            
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    
+                    if (result.success) {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').show();
+                        
+                        // Show detailed results
+                        let resultsHtml = `
+                            <div class="alert alert-success">
+                                <h6><i class="ri-check-circle-line me-2"></i>Import Summary</h6>
+                                <p class="mb-1"><strong>Imported:</strong> ${result.imported} questions</p>
+                                <p class="mb-0"><strong>Skipped:</strong> ${result.skipped} questions</p>
+                            </div>
+                        `;
+                        
+                        if (result.errors && result.errors.length > 0) {
+                            resultsHtml += `
+                                <div class="alert alert-warning">
+                                    <h6><i class="ri-alert-triangle-line me-2"></i>Errors/Warnings</h6>
+                                    <ul class="mb-0 small">
+                                        ${result.errors.map(err => `<li>${err}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                        
+                        $('#importResults').html(resultsHtml).show();
+                        
+                        showSuccessToast(result.message);
+                        
+                        // Refresh questions list after 3 seconds
+                        setTimeout(function() {
+                            loadQuizQuestions($('#current_quiz_id').val());
+                            $('#quizImportModal').modal('hide');
+                            submitBtn.find('.btn-text').html(originalText);
+                        }, 3000);
+                    } else {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').show();
+                        
+                        $('#importResults').html(`
+                            <div class="alert alert-danger">
+                                <i class="ri-error-warning-line me-2"></i>${result.message}
+                            </div>
+                        `).show();
+                        
+                        showErrorToast(result.message);
+                    }
+                },
+                error: function() {
+                    submitBtn.find('.btn-loading').hide();
+                    submitBtn.find('.btn-text').show();
+                    
+                    $('#importResults').html(`
+                        <div class="alert alert-danger">
+                            <i class="ri-error-warning-line me-2"></i>An error occurred while importing questions
+                        </div>
+                    `).show();
+                    
+                    showErrorToast('An error occurred while importing questions');
+                }
+            });
+        }
 
         // Duplicate course function
         function duplicateCourse(courseId) {
@@ -3777,13 +4536,16 @@ function getAssessmentQuestion($conn) {
         }
 
         // Quiz management functions
+        let currentQuizCourseId = null;
+        let currentQuizCourseName = '';
+
         function manageQuizzes(courseId, courseName) {
-            $('#current_course_id').val(courseId);
-            $('#quiz_course_id').val(courseId);
-            $('#upload_course_id_for_quize_image').val(courseId);
-            $('#quizCourseName').text(courseName);
+            currentQuizCourseId = courseId;
+            currentQuizCourseName = courseName;
             
-            // Load quizzes and show modal
+            $('#current_quiz_course_id').val(courseId);
+            $('#quizzesCourseName').text(courseName);
+            
             loadQuizzes(courseId);
             $('#manageQuizzesModal').modal('show');
         }
@@ -3792,7 +4554,10 @@ function getAssessmentQuestion($conn) {
             $.ajax({
                 url: '',
                 type: 'POST',
-                data: { action: 'get_quizzes', course_id: courseId },
+                data: { 
+                    action: 'get_quizzes',
+                    course_id: courseId 
+                },
                 success: function(response) {
                     const result = JSON.parse(response);
                     if (result.success) {
@@ -3800,29 +4565,35 @@ function getAssessmentQuestion($conn) {
                         let html = '';
                         
                         if (quizzes.length === 0) {
-                            html = '<tr><td colspan="6" class="text-center text-muted">No quiz questions found. Click "Add Question" to create one.</td></tr>';
+                            html = '<tr><td colspan="6" class="text-center text-muted">No quizzes found. Click "Add Quiz" to create one.</td></tr>';
                         } else {
                             quizzes.forEach(function(quiz) {
                                 const statusBadge = quiz.is_active == 1 ? 
                                     '<span class="badge bg-success">Active</span>' : 
                                     '<span class="badge bg-secondary">Inactive</span>';
                                 
+                                const imagePreview = quiz.quiz_image ? 
+                                    `<img src="../../../uploads/quizzes/${quiz.quiz_image}" style="max-width: 50px; max-height: 50px;" class="img-thumbnail">` : 
+                                    '-';
+                                
                                 html += `
                                     <tr>
                                         <td>${quiz.quiz_id}</td>
-                                        <td>${quiz.question_text.substring(0, 100)}${quiz.question_text.length > 100 ? '...' : ''}</td>
-                                        <td><span class="badge bg-primary">${quiz.correct_answer}</span></td>
-                                        <td>${quiz.points}</td>
+                                        <td>${quiz.quiz_name}</td>
+                                        <td>${quiz.quiz_description || '-'}</td>
+                                        <td>${imagePreview}</td>
                                         <td>${statusBadge}</td>
                                         <td>
-                                            <div class="btn-group btn-group-sm" role="group">
-                                                <button class="btn btn-outline-secondary btn-sm" onclick="editQuiz(${quiz.quiz_id})" title="Edit">
+                                           
+                                                <button class="btn btn-sm btn-info me-1" onclick="manageQuizQuestions(${quiz.quiz_id}, '${quiz.quiz_name}')" title="Manage Questions">
+                                                    <i class="ri-question-line"></i>
+                                                </button>
+                                                <button class="btn btn-sm btn-warning me-1" onclick="editQuiz(${quiz.quiz_id})" title="Edit">
                                                     <i class="ri-edit-line"></i>
                                                 </button>
-                                                <button class="btn btn-outline-danger btn-sm" onclick="deleteQuiz(${quiz.quiz_id})" title="Delete">
+                                                <button class="btn btn-sm btn-danger me-1" onclick="deleteQuiz(${quiz.quiz_id})" title="Delete">
                                                     <i class="ri-delete-bin-line"></i>
-                                                </button>
-                                            </div>
+                                                </button> 
                                         </td>
                                     </tr>
                                 `;
@@ -3830,9 +4601,6 @@ function getAssessmentQuestion($conn) {
                         }
                         
                         $('#quizzesTableBody').html(html);
-                        
-                        // Load quiz image if exists
-                        loadQuizImage(courseId);
                     } else {
                         showErrorToast(result.message);
                     }
@@ -3841,6 +4609,18 @@ function getAssessmentQuestion($conn) {
                     showErrorToast('Error loading quizzes');
                 }
             });
+        }
+
+        function showAddQuizModal() {
+            $('#quizForm')[0].reset();
+            $('#quizAction').val('add_quiz');
+            $('#quizModalLabel').text(`Add Quiz for ${currentQuizCourseName}`);
+            $('#quiz_id').val('');
+            $('#quiz_course_id').val(currentQuizCourseId);
+            $('#quiz_course_display').val(currentQuizCourseName);
+            $('#quiz_image_preview').html('');
+            $('#quiz_is_active').prop('checked', true);
+            $('#quizModal').modal('show');
         }
 
         function loadQuizImage(courseId) {
@@ -3892,18 +4672,22 @@ function getAssessmentQuestion($conn) {
                     if (result.success) {
                         const data = result.data;
                         
-                        $('#edit_quiz_id').val(data.quiz_id);
-                        $('#edit_quiz_course_id').val(data.course_id);
-                        $('#edit_question_text').val(data.question_text);
-                        $('#edit_option_a').val(data.option_a);
-                        $('#edit_option_b').val(data.option_b);
-                        $('#edit_option_c').val(data.option_c);
-                        $('#edit_option_d').val(data.option_d);
-                        $('#edit_correct_answer').val(data.correct_answer);
-                        $('#edit_quiz_points').val(data.points);
-                        $('#edit_quiz_is_active').prop('checked', data.is_active == 1);
+                        $('#quiz_id').val(data.quiz_id);
+                        $('#quiz_course_id').val(data.course_id);
+                        $('#quiz_name').val(data.quiz_name);
+                        $('#quiz_description').val(data.quiz_description || '');
+                        $('#quiz_course_display').val(currentQuizCourseName);
+                        $('#quiz_is_active').prop('checked', data.is_active == 1);
                         
-                        $('#editQuizModal').modal('show');
+                        if (data.quiz_image) {
+                            $('#quiz_image_preview').html(`<img src="../../../uploads/quizzes/${data.quiz_image}" class="img-thumbnail" style="max-width: 150px;">`);
+                        } else {
+                            $('#quiz_image_preview').html('');
+                        }
+                        
+                        $('#quizAction').val('update_quiz');
+                        $('#quizModalLabel').text('Edit Quiz');
+                        $('#quizModal').modal('show');
                     } else {
                         showErrorToast(result.message);
                     }
@@ -3937,7 +4721,359 @@ function getAssessmentQuestion($conn) {
                     const result = JSON.parse(response);
                     if (result.success) {
                         $('#deleteModal').modal('hide');
-                        loadQuizzes($('#current_course_id').val());
+                        loadQuizzes(currentQuizCourseId);
+                        showSuccessToast(result.message);
+                    } else {
+                        showErrorToast(result.message);
+                    }
+                }
+            });
+        }
+
+        // Quiz Questions management
+        function manageQuizQuestions(quizId, quizName) {
+            $('#current_quiz_id').val(quizId);
+            $('#question_quiz_id').val(quizId);
+            $('#quizQuestionsName').text(quizName);
+            
+            loadQuizQuestions(quizId);
+            $('#manageQuizQuestionsModal').modal('show');
+        }
+
+        function loadQuizQuestions(quizId) {
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: { action: 'get_quiz_questions', quiz_id: quizId },
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    if (result.success) {
+                        const questions = result.data;
+                        let html = '';
+                        
+                        if (questions.length === 0) {
+                            html = '<tr><td colspan="6" class="text-center text-muted">No questions found. Click "Add Question" to create one.</td></tr>';
+                        } else {
+                            questions.forEach(function(question) {
+                                const statusBadge = question.is_active == 1 ? 
+                                    '<span class="badge bg-success">Active</span>' : 
+                                    '<span class="badge bg-secondary">Inactive</span>';
+                                
+                                html += `
+                                    <tr>
+                                        <td>${question.question_id}</td>
+                                        <td>${question.question_text.substring(0, 100)}${question.question_text.length > 100 ? '...' : ''}</td>
+                                        <td><span class="badge bg-success">${question.correct_answer}</span></td>
+                                        <td>${question.points}</td>
+                                        <td>${statusBadge}</td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <button class="btn btn-outline-secondary" onclick="editQuizQuestion(${question.question_id})" title="Edit">
+                                                    <i class="ri-edit-line"></i>
+                                                </button>
+                                                <button class="btn btn-outline-danger" onclick="deleteQuizQuestion(${question.question_id})" title="Delete">
+                                                    <i class="ri-delete-bin-line"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `;
+                            });
+                        }
+                        
+                        $('#quizQuestionsTableBody').html(html);
+                    } else {
+                        showErrorToast(result.message);
+                    }
+                },
+                error: function() {
+                    showErrorToast('Error loading quiz questions');
+                }
+            });
+        }
+
+        function showQuizQuestionQuickAddPanel() {
+            $('#quizQuestionQuickAddPanel').slideDown(300);
+            setTimeout(() => {
+                $('#quick_quiz_question_text').focus();
+            }, 350);
+        }
+
+        function hideQuizQuestionQuickAddPanel() {
+            $('#quizQuestionQuickAddPanel').slideUp(300);
+        }
+
+        function clearQuizQuestionQuickForm() {
+            $('#quizQuestionQuickAddForm')[0].reset();
+            $('#quick_quiz_question_is_active').prop('checked', true);
+        }
+
+        function openQuizImportModal() {
+            $('#quizImportForm')[0].reset();
+            $('#importResults').hide();
+            $('#import_quiz_id').val($('#current_quiz_id').val());
+            $('#quizImportModal').modal('show');
+        }
+
+        function importQuizQuestions() {
+            const fileInput = document.getElementById('csv_file');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showErrorToast('Please select a CSV file to upload');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('action', 'import_quiz_questions');
+            formData.append('quiz_id', $('#current_quiz_id').val());
+            formData.append('csv_file', fileInput.files[0]);
+            
+            const submitBtn = $('#importQuizQuestionsBtn');
+            submitBtn.find('.btn-text').hide();
+            submitBtn.find('.btn-loading').show();
+            submitBtn.prop('disabled', true);
+            
+            $('#importResults').hide();
+            
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    
+                    if (result.success) {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').html('<i class="ri-check-line me-2"></i>Import Complete!');
+                        submitBtn.find('.btn-text').show();
+                        submitBtn.removeClass('btn-primary').addClass('btn-success');
+                        
+                        // Show detailed results
+                        let resultsHtml = `
+                            <div class="alert alert-success">
+                                <h6><i class="ri-check-circle-line me-2"></i>Import Summary</h6>
+                                <p class="mb-1"><strong>Imported:</strong> ${result.imported} questions</p>
+                                <p class="mb-0"><strong>Skipped:</strong> ${result.skipped} questions</p>
+                            </div>
+                        `;
+                        
+                        if (result.errors && result.errors.length > 0) {
+                            resultsHtml += `
+                                <div class="alert alert-warning">
+                                    <h6><i class="ri-alert-triangle-line me-2"></i>Errors/Warnings</h6>
+                                    <ul class="mb-0 small">
+                                        ${result.errors.map(err => `<li>${err}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                        
+                        $('#importResults').html(resultsHtml).show();
+                        
+                        showSuccessToast(result.message);
+                        
+                        // Refresh questions list after 3 seconds
+                        setTimeout(function() {
+                            loadQuizQuestions($('#current_quiz_id').val());
+                            $('#quizImportModal').modal('hide');
+                            
+                            // Reset button
+                            submitBtn.find('.btn-text').html('<i class="ri-upload-line me-2"></i>Import Questions');
+                            submitBtn.removeClass('btn-success').addClass('btn-primary');
+                            submitBtn.prop('disabled', false);
+                        }, 3000);
+                    } else {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').show();
+                        submitBtn.prop('disabled', false);
+                        
+                        $('#importResults').html(`
+                            <div class="alert alert-danger">
+                                <i class="ri-error-warning-line me-2"></i>${result.message}
+                            </div>
+                        `).show();
+                        
+                        showErrorToast(result.message);
+                    }
+                },
+                error: function() {
+                    submitBtn.find('.btn-loading').hide();
+                    submitBtn.find('.btn-text').show();
+                    submitBtn.prop('disabled', false);
+                    
+                    $('#importResults').html(`
+                        <div class="alert alert-danger">
+                            <i class="ri-error-warning-line me-2"></i>An error occurred while importing questions
+                        </div>
+                    `).show();
+                    
+                    showErrorToast('An error occurred while importing questions');
+                }
+            });
+        }
+
+        function openQuizImportModal() {
+            $('#quizImportForm')[0].reset();
+            $('#importResults').hide();
+            $('#import_quiz_id').val($('#current_quiz_id').val());
+            $('#quizImportModal').modal('show');
+        }
+
+        function importQuizQuestions() {
+            const fileInput = document.getElementById('csv_file');
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showErrorToast('Please select a CSV file to upload');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('action', 'import_quiz_questions');
+            formData.append('quiz_id', $('#import_quiz_id').val());
+            formData.append('csv_file', fileInput.files[0]);
+            
+            const submitBtn = $('#importQuizQuestionsBtn');
+            submitBtn.find('.btn-text').hide();
+            submitBtn.find('.btn-loading').show();
+            submitBtn.prop('disabled', true);
+            
+            $('#importResults').hide();
+            
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    
+                    if (result.success) {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').html('<i class="ri-check-line me-2"></i>Import Complete!').show();
+                        submitBtn.removeClass('btn-primary').addClass('btn-success');
+                        
+                        // Show detailed results
+                        let resultsHtml = `
+                            <div class="alert alert-success">
+                                <h6><i class="ri-check-circle-line me-2"></i>Import Summary</h6>
+                                <p class="mb-1"><strong>Imported:</strong> ${result.imported} questions</p>
+                                <p class="mb-0"><strong>Skipped:</strong> ${result.skipped} questions</p>
+                            </div>
+                        `;
+                        
+                        if (result.errors && result.errors.length > 0) {
+                            resultsHtml += `
+                                <div class="alert alert-warning">
+                                    <h6><i class="ri-alert-triangle-line me-2"></i>Errors/Warnings</h6>
+                                    <ul class="mb-0 small">
+                                        ${result.errors.map(err => `<li>${err}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                        
+                        $('#importResults').html(resultsHtml).show();
+                        
+                        showSuccessToast(result.message);
+                        
+                        // Refresh questions list after 3 seconds
+                        setTimeout(function() {
+                            loadQuizQuestions($('#current_quiz_id').val());
+                            $('#quizImportModal').modal('hide');
+                            
+                            // Reset button
+                            submitBtn.find('.btn-text').html('<i class="ri-upload-line me-2"></i>Import Questions');
+                            submitBtn.removeClass('btn-success').addClass('btn-primary');
+                            submitBtn.prop('disabled', false);
+                        }, 3000);
+                    } else {
+                        submitBtn.find('.btn-loading').hide();
+                        submitBtn.find('.btn-text').show();
+                        submitBtn.prop('disabled', false);
+                        
+                        $('#importResults').html(`
+                            <div class="alert alert-danger">
+                                <i class="ri-error-warning-line me-2"></i>${result.message}
+                            </div>
+                        `).show();
+                        
+                        showErrorToast(result.message);
+                    }
+                },
+                error: function() {
+                    submitBtn.find('.btn-loading').hide();
+                    submitBtn.find('.btn-text').show();
+                    submitBtn.prop('disabled', false);
+                    
+                    $('#importResults').html(`
+                        <div class="alert alert-danger">
+                            <i class="ri-error-warning-line me-2"></i>An error occurred while importing questions
+                        </div>
+                    `).show();
+                    
+                    showErrorToast('An error occurred while importing questions');
+                }
+            });
+        }
+
+        function editQuizQuestion(questionId) {
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: { action: 'get_quiz_question', question_id: questionId },
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    if (result.success) {
+                        const data = result.data;
+                        
+                        $('#edit_quiz_id').val(data.question_id); // Store question_id for update
+                        $('#edit_question_text').val(data.question_text);
+                        $('#edit_option_a').val(data.option_a);
+                        $('#edit_option_b').val(data.option_b);
+                        $('#edit_option_c').val(data.option_c);
+                        $('#edit_option_d').val(data.option_d);
+                        $('#edit_correct_answer').val(data.correct_answer);
+                        $('#edit_quiz_points').val(data.points);
+                        $('#edit_quiz_is_active').prop('checked', data.is_active == 1);
+                        
+                        $('#editQuizModal').modal('show');
+                    } else {
+                        showErrorToast(result.message);
+                    }
+                },
+                error: function() {
+                    showErrorToast('Error loading quiz question data');
+                }
+            });
+        }
+
+        function deleteQuizQuestion(questionId) {
+            deleteItemId = questionId;
+            deleteItemType = 'quiz_question';
+            
+            // Ensure delete modal appears above other modals
+            $('#deleteModal').css('z-index', 1060);
+            $('#deleteModal').modal('show');
+            
+            // Fix backdrop z-index after modal is shown
+            $('#deleteModal').on('shown.bs.modal', function() {
+                $('.modal-backdrop').last().css('z-index', 1059);
+            });
+        }
+
+        function deleteQuizQuestionConfirm(questionId) {
+            $.ajax({
+                url: '',
+                type: 'POST',
+                data: { action: 'delete_quiz_question', question_id: questionId },
+                success: function(response) {
+                    const result = JSON.parse(response);
+                    if (result.success) {
+                        $('#deleteModal').modal('hide');
+                        loadQuizQuestions($('#current_quiz_id').val());
                         showSuccessToast(result.message);
                     } else {
                         showErrorToast(result.message);
