@@ -993,7 +993,7 @@ function handleAudioUpload() {
           
             <div class="card-body">
                 <div class="table-responsive">
-                    <table id="categoriesDataTable" class="table table-striped table-bordered">
+                    <table id="categoriesDataTable" class="table table-hover align-middle mb-0">
                         <thead>
                             <tr>
                                 <th>ID</th>
@@ -1185,7 +1185,7 @@ function handleAudioUpload() {
         <div class="card">
             <div class="card-body">
                 <div class="table-responsive">
-                    <table id="conversationsTable" class="table table-striped table-bordered">
+                    <table id="conversationsTable" class="table table-hover align-middle mb-0 w-100">
                         <thead>
                             <tr>
                                 <th>ID</th>
@@ -1473,9 +1473,6 @@ function handleAudioUpload() {
     </div>
 
  
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
     <script>
         let conversationsTable;
         let categoriesDataTable;

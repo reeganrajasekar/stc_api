@@ -155,14 +155,48 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     if ($action == 'delete_user') {
         $user_id = intval($_POST['user_id']);
         
-        // Permanently delete the user from the database
-        $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
-        $stmt->bind_param("i", $user_id);
+        // Start transaction to ensure data integrity
+        $conn->begin_transaction();
         
-        if ($stmt->execute()) {
-            echo json_encode(['success' => true, 'message' => 'User deleted permanently']);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Failed to delete user']);
+        try {
+            // Disable foreign key checks temporarily
+            $conn->query("SET FOREIGN_KEY_CHECKS = 0");
+         
+            $stmt2 = $conn->prepare("DELETE FROM user_subscriptions WHERE user_id = ?");
+            $stmt2->bind_param("i", $user_id);
+            $stmt2->execute();
+            
+            // 3. Delete related points history
+            $stmt3 = $conn->prepare("DELETE FROM points_history WHERE user_id = ?");
+            $stmt3->bind_param("i", $user_id);
+            $stmt3->execute();
+            
+            // 4. Delete related user activity log
+            $stmt4 = $conn->prepare("DELETE FROM user_activity_log WHERE user_id = ?");
+            $stmt4->bind_param("i", $user_id);
+            $stmt4->execute();
+         
+            $stmt6 = $conn->prepare("DELETE FROM users WHERE id = ?");
+            $stmt6->bind_param("i", $user_id);
+            
+            if ($stmt6->execute()) {
+                // Re-enable foreign key checks
+                $conn->query("SET FOREIGN_KEY_CHECKS = 1");
+                
+                // Commit the transaction
+                $conn->commit();
+                echo json_encode(['success' => true, 'message' => 'User and related data deleted permanently']);
+            } else {
+                throw new Exception('Failed to delete user');
+            }
+            
+        } catch (Exception $e) {
+            // Re-enable foreign key checks
+            $conn->query("SET FOREIGN_KEY_CHECKS = 1");
+            
+            // Rollback the transaction on error
+            $conn->rollback();
+            echo json_encode(['success' => false, 'message' => 'Failed to delete user: ' . $e->getMessage()]);
         }
         exit;
     }
@@ -253,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             <i class="ti ti-refresh"></i> Refresh
         </button>
         <button class="btn btn-success" onclick="exportUsers()">
-            <i class="ti ti-download"></i> Export
+            <i class="ti ti-upload"></i> Export
         </button>
     </div>
     <div class="col-md-6 text-end">
@@ -529,22 +563,22 @@ $(document).ready(function() {
                 orderable: false,
                 render: function(data, type, row) {
                     return `
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-outline-primary" onclick="viewUser(${row[0]})" title="View">
+                        
+                            <button class="btn btn-sm btn-info me-1" onclick="viewUser(${row[0]})" title="View">
                                 <i class="ti ti-eye"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-warning" onclick="editUser(${row[0]})" title="Edit">
+                            <button class="btn btn-sm btn-warning me-1" onclick="editUser(${row[0]})" title="Edit">
                                 <i class="ti ti-edit"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-${row[4] == 1 ? 'danger' : 'success'}" 
+                            <button class="btn btn-sm me-1 btn-${row[4] == 1 ? 'danger' : 'success'}" 
                                     onclick="toggleUserStatus(${row[0]}, ${row[4]})" 
                                     title="${row[4] == 1 ? 'Deactivate' : 'Activate'}">
                                 <i class="ti ti-${row[4] == 1 ? 'user-x' : 'user-check'}"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${row[0]})" title="Delete">
+                            <button class="btn btn-sm btn-danger me-1" onclick="deleteUser(${row[0]})" title="Delete">
                                 <i class="ti ti-trash"></i>
                             </button>
-                        </div>
+                      
                     `;
                 }
             }

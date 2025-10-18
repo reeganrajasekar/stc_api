@@ -32,37 +32,61 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         ];
 
         // --- 1. Base filtering ---
-        $where = " WHERE user_role = 'enterprise' "; // Only show enterprise users
+        $where = " WHERE u.user_role = 'enterprise' "; // Only show enterprise users
         
         // Apply enterprise filter if provided
         if (isset($params['enterprise_filter']) && !empty($params['enterprise_filter'])) {
             $enterprise_filter = $conn->real_escape_string($params['enterprise_filter']);
-            $where .= " AND enterprise_id = '$enterprise_filter' ";
+            $where .= " AND u.enterprise_id = '$enterprise_filter' ";
+        }
+        
+        // Apply degree filter if provided
+        if (isset($params['degree_filter']) && !empty($params['degree_filter'])) {
+            $degree_filter = $conn->real_escape_string($params['degree_filter']);
+            $where .= " AND u.degree = '$degree_filter' ";
+        }
+        
+        // Apply department filter if provided
+        if (isset($params['department_filter']) && !empty($params['department_filter'])) {
+            $department_filter = $conn->real_escape_string($params['department_filter']);
+            $where .= " AND u.department = '$department_filter' ";
+        }
+        
+        // Apply graduation year filter if provided
+        if (isset($params['graduation_filter']) && !empty($params['graduation_filter'])) {
+            $graduation_filter = $conn->real_escape_string($params['graduation_filter']);
+            $where .= " AND u.graduation_year = '$graduation_filter' ";
+        }
+        
+        // Apply category filter if provided
+        if (isset($params['category_filter']) && !empty($params['category_filter'])) {
+            $category_filter = $conn->real_escape_string($params['category_filter']);
+            $where .= " AND u.program_category = '$category_filter' ";
         }
         
         // Apply filter based on type
         $filter = isset($params['filter']) ? $params['filter'] : 'all';
         switch($filter) {
             case 'verified':
-                $where .= " AND is_verified = 1 AND is_active = 1 ";
+                $where .= " AND u.is_verified = 1 AND u.is_active = 1 ";
                 break;
             case 'unverified':
-                $where .= " AND is_verified = 0 AND is_active = 1 ";
+                $where .= " AND u.is_verified = 0 AND u.is_active = 1 ";
                 break;
             case 'active':
-                $where .= " AND is_active = 1 ";
+                $where .= " AND u.is_active = 1 ";
                 break;
             case 'recently_active':
-                $where .= " AND is_active = 1 AND last_login >= DATE_SUB(NOW(), INTERVAL 7 DAY) ";
+                $where .= " AND u.is_active = 1 AND u.last_login >= DATE_SUB(NOW(), INTERVAL 7 DAY) ";
                 break;
             case 'inactive':
-                $where .= " AND is_active = 1 AND (last_login < DATE_SUB(NOW(), INTERVAL 7 DAY) OR last_login IS NULL) ";
+                $where .= " AND u.is_active = 1 AND (u.last_login < DATE_SUB(NOW(), INTERVAL 7 DAY) OR u.last_login IS NULL) ";
                 break;
             case 'paid':
-                $where .= " AND is_active = 1 AND id IN (SELECT DISTINCT id FROM user_subscriptions WHERE is_active = 1 AND payment_status = 'completed') ";
+                $where .= " AND u.is_active = 1 AND u.id IN (SELECT DISTINCT user_id FROM user_subscriptions WHERE is_active = 1 AND payment_status = 'completed') ";
                 break;
             case 'unpaid':
-                $where .= " AND is_active = 1 AND id NOT IN (SELECT DISTINCT id FROM user_subscriptions WHERE is_active = 1 AND payment_status = 'completed') ";
+                $where .= " AND u.is_active = 1 AND u.id NOT IN (SELECT DISTINCT user_id FROM user_subscriptions WHERE is_active = 1 AND payment_status = 'completed') ";
                 break;
             case 'all':
             default:
@@ -71,22 +95,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         }
 
         // --- 2. Total records (with filter applied) ---
-        $sqlTotal = "SELECT COUNT(*) as cnt FROM users $where";
+        $sqlTotal = "SELECT COUNT(*) as cnt FROM users u $where";
     $resTotal = $conn->query($sqlTotal);
     $totalRecords = $resTotal->fetch_assoc()['cnt'];
 
     if (!empty($params['search']['value'])) {
         $search = $conn->real_escape_string($params['search']['value']);
         $where .= " AND (
-                full_name LIKE '%$search%' 
-            OR email LIKE '%$search%' 
-                OR mobile_number LIKE '%$search%' 
-                OR country LIKE '%$search%'
+                u.full_name LIKE '%$search%' 
+            OR u.email LIKE '%$search%' 
+                OR u.mobile_number LIKE '%$search%' 
+                OR u.country LIKE '%$search%'
         )";
     }
 
     // --- 3. Filtered count ---
-    $sqlFiltered = "SELECT COUNT(*) as cnt FROM users $where";
+    $sqlFiltered = "SELECT COUNT(*) as cnt FROM users u $where";
     $resFiltered = $conn->query($sqlFiltered);
     $totalFiltered = $resFiltered->fetch_assoc()['cnt'];
 
@@ -159,14 +183,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     if ($action == 'delete_user') {
         $user_id = intval($_POST['user_id']);
         
-        // Permanently delete the user from the database
-        $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
-        $stmt->bind_param("i", $user_id);
+        // Start transaction to ensure data integrity
+        $conn->begin_transaction();
         
-        if ($stmt->execute()) {
-            echo json_encode(['success' => true, 'message' => 'User deleted permanently']);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Failed to delete user']);
+        try {
+            // Disable foreign key checks temporarily
+            $conn->query("SET FOREIGN_KEY_CHECKS = 0");
+
+            
+       
+            
+            // 3. Delete related points history
+            $stmt3 = $conn->prepare("DELETE FROM points_history WHERE user_id = ?");
+            $stmt3->bind_param("i", $user_id);
+            $stmt3->execute();
+            
+            // 4. Delete related user activity log
+            $stmt4 = $conn->prepare("DELETE FROM user_activity_log WHERE user_id = ?");
+            $stmt4->bind_param("i", $user_id);
+            $stmt4->execute();
+      
+            
+            // 6. Finally, delete the user
+            $stmt6 = $conn->prepare("DELETE FROM users WHERE id = ?");
+            $stmt6->bind_param("i", $user_id);
+            
+            if ($stmt6->execute()) {
+                // Re-enable foreign key checks
+                $conn->query("SET FOREIGN_KEY_CHECKS = 1");
+                
+                // Commit the transaction
+                $conn->commit();
+                echo json_encode(['success' => true, 'message' => 'User and related data deleted permanently']);
+            } else {
+                throw new Exception('Failed to delete user');
+            }
+            
+        } catch (Exception $e) {
+            // Re-enable foreign key checks
+            $conn->query("SET FOREIGN_KEY_CHECKS = 1");
+            
+            // Rollback the transaction on error
+            $conn->rollback();
+            echo json_encode(['success' => false, 'message' => 'Failed to delete user: ' . $e->getMessage()]);
         }
         exit;
     }
@@ -532,6 +591,194 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         exit;
     }
     
+    if ($action == 'get_all_departments_by_enterprise') {
+        $enterprise_id = $conn->real_escape_string($_POST['enterprise_id']);
+        
+        $stmt = $conn->prepare("
+            SELECT DISTINCT department 
+            FROM users 
+            WHERE enterprise_id = ? AND department IS NOT NULL AND department != '' AND user_role = 'enterprise' AND is_active = 1
+            ORDER BY department ASC
+        ");
+        $stmt->bind_param("s", $enterprise_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        $departments = [];
+        while ($row = $result->fetch_assoc()) {
+            $departments[] = $row['department'];
+        }
+        
+        echo json_encode(['success' => true, 'data' => $departments]);
+        exit;
+    }
+    
+    if ($action == 'get_enterprise_permissions') {
+        $enterprise_id = $conn->real_escape_string($_POST['enterprise_id']);
+        
+        // Get common permissions for the enterprise (most common values)
+        $stmt = $conn->prepare("
+            SELECT 
+                ROUND(AVG(is_course)) as is_course,
+                ROUND(AVG(is_books)) as is_books,
+                ROUND(AVG(is_listening)) as is_listening,
+                ROUND(AVG(is_phrases)) as is_phrases,
+                ROUND(AVG(is_speaking)) as is_speaking,
+                ROUND(AVG(is_reading)) as is_reading,
+                ROUND(AVG(is_videos)) as is_videos,
+                COUNT(*) as user_count
+            FROM users 
+            WHERE enterprise_id = ? AND user_role = 'enterprise' AND is_active = 1
+        ");
+        $stmt->bind_param("s", $enterprise_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $permissions = $result->fetch_assoc();
+            echo json_encode(['success' => true, 'data' => $permissions, 'user_count' => $permissions['user_count']]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'No users found for this enterprise']);
+        }
+        exit;
+    }
+    
+    if ($action == 'get_all_graduation_years_by_enterprise') {
+        $enterprise_id = $conn->real_escape_string($_POST['enterprise_id']);
+        $degree = isset($_POST['degree']) ? $conn->real_escape_string($_POST['degree']) : '';
+        
+        $sql = "SELECT DISTINCT graduation_year FROM users WHERE enterprise_id = ? AND user_role = 'enterprise' AND is_active = 1";
+        $params = [$enterprise_id];
+        $types = "s";
+        
+        if (!empty($degree)) {
+            $sql .= " AND degree = ?";
+            $params[] = $degree;
+            $types .= "s";
+        }
+        
+        $sql .= " ORDER BY graduation_year DESC";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        $years = [];
+        while ($row = $result->fetch_assoc()) {
+            if (!empty($row['graduation_year'])) {
+                $years[] = $row['graduation_year'];
+            }
+        }
+        
+        echo json_encode(['success' => true, 'data' => $years]);
+        exit;
+    }
+    
+    if ($action == 'get_all_categories_by_enterprise') {
+        $enterprise_id = $conn->real_escape_string($_POST['enterprise_id']);
+        $degree = isset($_POST['degree']) ? $conn->real_escape_string($_POST['degree']) : '';
+        $department = isset($_POST['department']) ? $conn->real_escape_string($_POST['department']) : '';
+        
+        $sql = "SELECT DISTINCT program_category FROM users WHERE enterprise_id = ? AND user_role = 'enterprise' AND is_active = 1";
+        $params = [$enterprise_id];
+        $types = "s";
+        
+        if (!empty($degree)) {
+            $sql .= " AND degree = ?";
+            $params[] = $degree;
+            $types .= "s";
+        }
+        
+        if (!empty($department)) {
+            $sql .= " AND department = ?";
+            $params[] = $department;
+            $types .= "s";
+        }
+        
+        $sql .= " ORDER BY program_category";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        $categories = [];
+        while ($row = $result->fetch_assoc()) {
+            if (!empty($row['program_category'])) {
+                $categories[] = $row['program_category'];
+            }
+        }
+        
+        echo json_encode(['success' => true, 'data' => $categories]);
+        exit;
+    }
+    
+    if ($action == 'get_filtered_permissions') {
+        $enterprise_id = $conn->real_escape_string($_POST['enterprise_id']);
+        $degree = isset($_POST['degree']) ? $conn->real_escape_string($_POST['degree']) : '';
+        $department = isset($_POST['department']) ? $conn->real_escape_string($_POST['department']) : '';
+        $graduation_year = isset($_POST['graduation_year']) ? $conn->real_escape_string($_POST['graduation_year']) : '';
+        $category = isset($_POST['category']) ? $conn->real_escape_string($_POST['category']) : '';
+        
+        // Build dynamic query based on filters
+        $sql = "SELECT 
+                    ROUND(AVG(is_course)) as is_course,
+                    ROUND(AVG(is_books)) as is_books,
+                    ROUND(AVG(is_listening)) as is_listening,
+                    ROUND(AVG(is_phrases)) as is_phrases,
+                    ROUND(AVG(is_speaking)) as is_speaking,
+                    ROUND(AVG(is_reading)) as is_reading,
+                    ROUND(AVG(is_videos)) as is_videos,
+                    COUNT(*) as user_count
+                FROM users 
+                WHERE enterprise_id = ? AND user_role = 'enterprise' AND is_active = 1";
+        
+        $params = [$enterprise_id];
+        $types = "s";
+        
+        if (!empty($degree)) {
+            $sql .= " AND degree = ?";
+            $params[] = $degree;
+            $types .= "s";
+        }
+        
+        if (!empty($department)) {
+            $sql .= " AND department = ?";
+            $params[] = $department;
+            $types .= "s";
+        }
+        
+        if (!empty($graduation_year)) {
+            $sql .= " AND graduation_year = ?";
+            $params[] = $graduation_year;
+            $types .= "s";
+        }
+        
+        if (!empty($category)) {
+            $sql .= " AND program_category = ?";
+            $params[] = $category;
+            $types .= "s";
+        }
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $permissions = $result->fetch_assoc();
+            if ($permissions['user_count'] > 0) {
+                echo json_encode(['success' => true, 'data' => $permissions, 'user_count' => $permissions['user_count']]);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'No users found matching the criteria', 'user_count' => 0]);
+            }
+        } else {
+            echo json_encode(['success' => false, 'message' => 'No users found matching the criteria', 'user_count' => 0]);
+        }
+        exit;
+    }
+    
     if ($action == 'get_current_permissions') {
         $enterprise_id = $conn->real_escape_string($_POST['enterprise_id']);
         $degree = $conn->real_escape_string($_POST['degree']);
@@ -834,12 +1081,44 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
 
 <!-- Enterprise Filter -->
 <div class="row mb-3">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <label for="enterpriseFilter" class="form-label fw-bold">
             <i class="ti ti-building me-1"></i>Filter by Enterprise
         </label>
         <select id="enterpriseFilter" class="form-select" onchange="filterByEnterprise()">
             <option value="">All Enterprises</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label for="degreeFilter" class="form-label fw-bold">
+            <i class="ti ti-school me-1"></i>Degree
+        </label>
+        <select id="degreeFilter" class="form-select" onchange="filterByDegree()" disabled>
+            <option value="">All Degrees</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label for="departmentFilter" class="form-label fw-bold">
+            <i class="ti ti-building-store me-1"></i>Department
+        </label>
+        <select id="departmentFilter" class="form-select" onchange="filterByDepartment()" disabled>
+            <option value="">All Departments</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label for="graduationFilter" class="form-label fw-bold">
+            <i class="ti ti-calendar me-1"></i>Graduation Year
+        </label>
+        <select id="graduationFilter" class="form-select" onchange="filterByGraduation()" disabled>
+            <option value="">All Years</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label for="categoryFilter" class="form-label fw-bold">
+            <i class="ti ti-category me-1"></i>Program Category
+        </label>
+        <select id="categoryFilter" class="form-select" onchange="filterByCategory()" disabled>
+            <option value="">All Categories</option>
         </select>
     </div>
 </div>
@@ -978,6 +1257,10 @@ $(document).ready(function() {
                 d.action = 'get_users';
                 d.filter = currentFilter;
                 d.enterprise_filter = currentEnterpriseFilter;
+                d.degree_filter = currentDegreeFilter;
+                d.department_filter = currentDepartmentFilter;
+                d.graduation_filter = currentGraduationFilter;
+                d.category_filter = currentCategoryFilter;
                 return d;
             }
         },
@@ -1140,7 +1423,7 @@ $(document).ready(function() {
                             <button class="btn btn-sm btn-warning me-1" onclick="editUser(${row[0]})" title="Edit">
                                 <i class="ti ti-edit"></i>
                             </button>
-                            <button class="btn btn-sm btn-info-${row[4] == 1 ? 'danger' : 'success'}" 
+                            <button class="btn btn-sm btn-${row[4] == 1 ? 'danger' : 'success'}" 
                                     onclick="toggleUserStatus(${row[0]}, ${row[4]})" 
                                     title="${row[4] == 1 ? 'Deactivate' : 'Activate'}">
                                 <i class="ti ti-${row[4] == 1 ? 'user-x' : 'user-check'}"></i>
@@ -1156,6 +1439,108 @@ $(document).ready(function() {
     });
 });
 
+function loadDepartmentFilter(enterpriseId, degree) {
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_departments_by_degree',
+            enterprise_id: enterpriseId,
+            degree: degree
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success) {
+                let options = '<option value="">All Departments</option>';
+                result.data.forEach(function(department) {
+                    options += `<option value="${department}">${department}</option>`;
+                });
+                $('#departmentFilter').html(options);
+            }
+        },
+        error: function() {
+            console.error('Failed to load department filter');
+        }
+    });
+}
+
+function loadAllDepartmentsForEnterprise(enterpriseId) {
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_all_departments_by_enterprise',
+            enterprise_id: enterpriseId
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success) {
+                let options = '<option value="">All Departments</option>';
+                result.data.forEach(function(department) {
+                    options += `<option value="${department}">${department}</option>`;
+                });
+                $('#departmentFilter').html(options);
+            }
+        },
+        error: function() {
+            console.error('Failed to load all departments filter');
+        }
+    });
+}
+
+function loadGraduationFilter(enterpriseId, degree, department) {
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_all_graduation_years_by_enterprise',
+            enterprise_id: enterpriseId,
+            degree: degree,
+            department: department
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success) {
+                let options = '<option value="">All Years</option>';
+                result.data.forEach(function(year) {
+                    options += `<option value="${year}">${year}</option>`;
+                });
+                $('#graduationFilter').html(options);
+            }
+        },
+        error: function() {
+            console.error('Failed to load graduation filter');
+        }
+    });
+}
+
+function loadCategoryFilter(enterpriseId, degree, department, graduation) {
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_all_categories_by_enterprise',
+            enterprise_id: enterpriseId,
+            degree: degree,
+            department: department,
+            graduation_year: graduation
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success) {
+                let options = '<option value="">All Categories</option>';
+                result.data.forEach(function(category) {
+                    options += `<option value="${category}">${category}</option>`;
+                });
+                $('#categoryFilter').html(options);
+            }
+        },
+        error: function() {
+            console.error('Failed to load category filter');
+        }
+    });
+}
+
 // User Management Functions
 function refreshTable() {
     $('#dataTable').DataTable().ajax.reload(null, false);
@@ -1168,6 +1553,15 @@ function refreshDataTable() {
         if (table) {
             // Show loading indicator
             $('#dataTable_processing').show();
+            
+            console.log('Refreshing DataTable with filters:', {
+                filter: currentFilter,
+                enterprise_filter: currentEnterpriseFilter,
+                degree_filter: currentDegreeFilter,
+                department_filter: currentDepartmentFilter,
+                graduation_filter: currentGraduationFilter,
+                category_filter: currentCategoryFilter
+            });
             
             table.ajax.reload(null, false);
             console.log('DataTable refreshed successfully');
@@ -1189,6 +1583,10 @@ function refreshDataTable() {
 // Global variables for filtering
 let currentFilter = 'all';
 let currentEnterpriseFilter = '';
+let currentDegreeFilter = '';
+let currentDepartmentFilter = '';
+let currentGraduationFilter = '';
+let currentCategoryFilter = '';
 
 function filterUsers(type) {
     currentFilter = type;
@@ -1202,6 +1600,116 @@ function filterUsers(type) {
 
 function filterByEnterprise() {
     currentEnterpriseFilter = $('#enterpriseFilter').val();
+    
+    // Reset all dependent filter global variables
+    currentDegreeFilter = '';
+    currentDepartmentFilter = '';
+    currentGraduationFilter = '';
+    currentCategoryFilter = '';
+    
+    console.log('Enterprise filter changed to:', currentEnterpriseFilter);
+    
+    // Reset and enable/disable dependent filters
+    if (currentEnterpriseFilter) {
+        // Enable and load degree filter
+        $('#degreeFilter').prop('disabled', false);
+        loadDegreeFilter(currentEnterpriseFilter);
+        
+        // Reset dependent filters
+        $('#departmentFilter').html('<option value="">All Departments</option>').prop('disabled', true);
+        $('#graduationFilter').html('<option value="">All Years</option>').prop('disabled', true);
+        $('#categoryFilter').html('<option value="">All Categories</option>').prop('disabled', true);
+    } else {
+        // Disable all dependent filters
+        $('#degreeFilter').html('<option value="">All Degrees</option>').prop('disabled', true);
+        $('#departmentFilter').html('<option value="">All Departments</option>').prop('disabled', true);
+        $('#graduationFilter').html('<option value="">All Years</option>').prop('disabled', true);
+        $('#categoryFilter').html('<option value="">All Categories</option>').prop('disabled', true);
+    }
+    
+    refreshDataTable();
+}
+
+function filterByDegree() {
+    const enterpriseId = $('#enterpriseFilter').val();
+    const degree = $('#degreeFilter').val();
+    
+    // Update global variable
+    currentDegreeFilter = degree;
+    
+    if (degree) {
+        // Enable and load department filter
+        $('#departmentFilter').prop('disabled', false);
+        loadDepartmentFilter(enterpriseId, degree);
+    } else {
+        // Load all departments for enterprise
+        $('#departmentFilter').prop('disabled', false);
+        loadAllDepartmentsForEnterprise(enterpriseId);
+    }
+    
+    // Reset dependent filters and their global variables
+    currentDepartmentFilter = '';
+    currentGraduationFilter = '';
+    currentCategoryFilter = '';
+    $('#graduationFilter').html('<option value="">All Years</option>').prop('disabled', true);
+    $('#categoryFilter').html('<option value="">All Categories</option>').prop('disabled', true);
+    
+    refreshDataTable();
+}
+
+function filterByDepartment() {
+    const enterpriseId = $('#enterpriseFilter').val();
+    const degree = $('#degreeFilter').val();
+    const department = $('#departmentFilter').val();
+    
+    // Update global variable
+    currentDepartmentFilter = department;
+    
+    // Enable graduation filter
+    $('#graduationFilter').prop('disabled', false);
+    if (department) {
+        loadGraduationFilter(enterpriseId, degree, department);
+    } else {
+        loadAllGraduationYearsForEnterprise(enterpriseId, degree);
+    }
+    
+    // Reset dependent filter and its global variable
+    currentGraduationFilter = '';
+    currentCategoryFilter = '';
+    $('#categoryFilter').html('<option value="">All Categories</option>').prop('disabled', true);
+    
+    refreshDataTable();
+}
+
+function filterByGraduation() {
+    const enterpriseId = $('#enterpriseFilter').val();
+    const degree = $('#degreeFilter').val();
+    const department = $('#departmentFilter').val();
+    const graduation = $('#graduationFilter').val();
+    
+    // Update global variable
+    currentGraduationFilter = graduation;
+    
+    // Enable category filter
+    $('#categoryFilter').prop('disabled', false);
+    if (graduation) {
+        loadCategoryFilter(enterpriseId, degree, department, graduation);
+    } else {
+        loadAllCategoriesForEnterprise(enterpriseId, degree, department);
+    }
+    
+    // Reset dependent filter global variable
+    currentCategoryFilter = '';
+    
+    refreshDataTable();
+}
+
+function filterByCategory() {
+    const category = $('#categoryFilter').val();
+    
+    // Update global variable
+    currentCategoryFilter = category;
+    
     refreshDataTable();
 }
 
@@ -1224,6 +1732,30 @@ function loadEnterpriseFilter() {
         },
         error: function() {
             console.error('Failed to load enterprise filter');
+        }
+    });
+}
+
+function loadDegreeFilter(enterpriseId) {
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_degrees_by_enterprise',
+            enterprise_id: enterpriseId
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success) {
+                let options = '<option value="">All Degrees</option>';
+                result.data.forEach(function(degree) {
+                    options += `<option value="${degree}">${degree}</option>`;
+                });
+                $('#degreeFilter').html(options);
+            }
+        },
+        error: function() {
+            console.error('Failed to load degree filter');
         }
     });
 }
@@ -2135,15 +2667,17 @@ function onEnterpriseChange() {
     const enterpriseId = $('#perm_enterprise').val();
     
     // Reset dependent dropdowns with disabled state
-    $('#perm_degree').html('<option value="">Select Degree</option>').prop('disabled', true).css('opacity', '0.6');
-    $('#perm_department').html('<option value="">Select Department</option>').prop('disabled', true).css('opacity', '0.6');
-    $('#perm_graduation_year').html('<option value="">Select Graduation Year</option>').prop('disabled', true).css('opacity', '0.6');
-    $('#perm_category').html('<option value="">Select Category</option>').prop('disabled', true).css('opacity', '0.6');
-    $('#permissionsCheckboxes').hide();
+    $('#perm_degree').html('<option value="">All Degrees</option>').prop('disabled', false).css('opacity', '1');
+    $('#perm_department').html('<option value="">All Departments</option>').prop('disabled', false).css('opacity', '1');
+    $('#perm_graduation_year').html('<option value="">All Graduation Years</option>').prop('disabled', false).css('opacity', '1');
+    $('#perm_category').html('<option value="">All Categories</option>').prop('disabled', false).css('opacity', '1');
     
-    if (!enterpriseId) return;
+    if (!enterpriseId) {
+        $('#permissionsCheckboxes').hide();
+        return;
+    }
     
-    // Load degrees
+    // Load degrees for the dropdown
     $.ajax({
         url: '',
         type: 'POST',
@@ -2154,15 +2688,49 @@ function onEnterpriseChange() {
         success: function(response) {
             const result = JSON.parse(response);
             if (result.success && result.data.length > 0) {
-                let options = '<option value="">Select Degree</option>';
+                let options = '<option value="">All Degrees</option>';
                 result.data.forEach(function(degree) {
                     options += `<option value="${degree}">${degree}</option>`;
                 });
-                $('#perm_degree').html(options).prop('disabled', false).css('opacity', '1');
-            } else {
-                if (typeof toastr !== 'undefined') {
-                    toastr.warning('No degrees found for this enterprise');
-                }
+                $('#perm_degree').html(options);
+            }
+        }
+    });
+    
+    // Load current permissions for the entire enterprise and show permissions immediately
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_enterprise_permissions',
+            enterprise_id: enterpriseId
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success) {
+                const perms = result.data;
+                
+                // Set checkbox values based on enterprise permissions
+                $('#perm_is_course').prop('checked', perms.is_course == 1);
+                $('#perm_is_books').prop('checked', perms.is_books == 1);
+                $('#perm_is_listening').prop('checked', perms.is_listening == 1);
+                $('#perm_is_phrases').prop('checked', perms.is_phrases == 1);
+                $('#perm_is_speaking').prop('checked', perms.is_speaking == 1);
+                $('#perm_is_reading').prop('checked', perms.is_reading == 1);
+                $('#perm_is_videos').prop('checked', perms.is_videos == 1);
+                
+                // Update user count display
+                const userCount = result.user_count || 0;
+                $('#affectedUsersCount').html(`
+                    <div class="alert alert-info">
+                        <i class="ti ti-users me-2"></i>
+                        <strong>${userCount}</strong> user(s) in this enterprise will be affected by permission changes.
+                        <br><small class="text-muted">Use the filters below to narrow down to specific groups if needed.</small>
+                    </div>
+                `);
+                
+                // Show permissions checkboxes immediately
+                $('#permissionsCheckboxes').show();
             }
         }
     });
@@ -2173,14 +2741,17 @@ function onDegreeChange() {
     const degree = $('#perm_degree').val();
     
     // Reset dependent dropdowns
-    $('#perm_department').html('<option value="">Select Department</option>').prop('disabled', true);
-    $('#perm_graduation_year').html('<option value="">Select Graduation Year</option>').prop('disabled', true);
-    $('#perm_category').html('<option value="">Select Category</option>').prop('disabled', true);
-    $('#permissionsCheckboxes').hide();
+    $('#perm_department').html('<option value="">All Departments</option>');
+    $('#perm_graduation_year').html('<option value="">All Graduation Years</option>');
+    $('#perm_category').html('<option value="">All Categories</option>');
     
-    if (!degree) return;
+    if (!degree) {
+        // If no specific degree selected, load all departments for the enterprise
+        loadAllDepartments(enterpriseId);
+        return;
+    }
     
-    // Load departments
+    // Load departments for specific degree
     $.ajax({
         url: '',
         type: 'POST',
@@ -2192,15 +2763,37 @@ function onDegreeChange() {
         success: function(response) {
             const result = JSON.parse(response);
             if (result.success && result.data.length > 0) {
-                let options = '<option value="">Select Department</option>';
+                let options = '<option value="">All Departments</option>';
                 result.data.forEach(function(dept) {
                     options += `<option value="${dept}">${dept}</option>`;
                 });
-                $('#perm_department').html(options).prop('disabled', false);
-            } else {
-                if (typeof toastr !== 'undefined') {
-                    toastr.warning('No departments found for this degree');
-                }
+                $('#perm_department').html(options);
+            }
+        }
+    });
+    
+    // Update permissions based on current filters
+    updatePermissionsDisplay();
+}
+
+function loadAllDepartments(enterpriseId) {
+    if (!enterpriseId) return;
+    
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_all_departments_by_enterprise',
+            enterprise_id: enterpriseId
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success && result.data.length > 0) {
+                let options = '<option value="">All Departments</option>';
+                result.data.forEach(function(dept) {
+                    options += `<option value="${dept}">${dept}</option>`;
+                });
+                $('#perm_department').html(options);
             }
         }
     });
@@ -2212,13 +2805,16 @@ function onDepartmentChange() {
     const department = $('#perm_department').val();
     
     // Reset dependent dropdowns
-    $('#perm_graduation_year').html('<option value="">Select Graduation Year</option>').prop('disabled', true);
-    $('#perm_category').html('<option value="">Select Category</option>').prop('disabled', true);
-    $('#permissionsCheckboxes').hide();
+    $('#perm_graduation_year').html('<option value="">All Graduation Years</option>');
+    $('#perm_category').html('<option value="">All Categories</option>');
     
-    if (!department) return;
+    if (!department) {
+        // If no specific department selected, load all graduation years for the current filters
+        loadAllGraduationYears(enterpriseId, degree);
+        return;
+    }
     
-    // Load graduation years
+    // Load graduation years for specific department
     $.ajax({
         url: '',
         type: 'POST',
@@ -2231,15 +2827,38 @@ function onDepartmentChange() {
         success: function(response) {
             const result = JSON.parse(response);
             if (result.success && result.data.length > 0) {
-                let options = '<option value="">Select Graduation Year</option>';
+                let options = '<option value="">All Graduation Years</option>';
                 result.data.forEach(function(year) {
                     options += `<option value="${year}">${year}</option>`;
                 });
-                $('#perm_graduation_year').html(options).prop('disabled', false);
-            } else {
-                if (typeof toastr !== 'undefined') {
-                    toastr.warning('No graduation years found');
-                }
+                $('#perm_graduation_year').html(options);
+            }
+        }
+    });
+    
+    // Update permissions based on current filters
+    updatePermissionsDisplay();
+}
+
+function loadAllGraduationYears(enterpriseId, degree) {
+    if (!enterpriseId) return;
+    
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_all_graduation_years_by_enterprise',
+            enterprise_id: enterpriseId,
+            degree: degree || ''
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success && result.data.length > 0) {
+                let options = '<option value="">All Graduation Years</option>';
+                result.data.forEach(function(year) {
+                    options += `<option value="${year}">${year}</option>`;
+                });
+                $('#perm_graduation_year').html(options);
             }
         }
     });
@@ -2252,12 +2871,15 @@ function onGraduationYearChange() {
     const graduationYear = $('#perm_graduation_year').val();
     
     // Reset dependent dropdowns
-    $('#perm_category').html('<option value="">Select Category</option>').prop('disabled', true);
-    $('#permissionsCheckboxes').hide();
+    $('#perm_category').html('<option value="">All Categories</option>');
     
-    if (!graduationYear) return;
+    if (!graduationYear) {
+        // If no specific graduation year selected, load all categories for current filters
+        loadAllCategories(enterpriseId, degree, department);
+        return;
+    }
     
-    // Load categories
+    // Load categories for specific graduation year
     $.ajax({
         url: '',
         type: 'POST',
@@ -2271,51 +2893,79 @@ function onGraduationYearChange() {
         success: function(response) {
             const result = JSON.parse(response);
             if (result.success && result.data.length > 0) {
-                let options = '<option value="">Select Category</option>';
+                let options = '<option value="">All Categories</option>';
                 result.data.forEach(function(category) {
                     options += `<option value="${category}">${category}</option>`;
                 });
-                $('#perm_category').html(options).prop('disabled', false);
-            } else {
-                if (typeof toastr !== 'undefined') {
-                    toastr.warning('No categories found');
-                }
+                $('#perm_category').html(options);
+            }
+        }
+    });
+    
+    // Update permissions based on current filters
+    updatePermissionsDisplay();
+}
+
+function loadAllCategories(enterpriseId, degree, department) {
+    if (!enterpriseId) return;
+    
+    $.ajax({
+        url: '',
+        type: 'POST',
+        data: {
+            action: 'get_all_categories_by_enterprise',
+            enterprise_id: enterpriseId,
+            degree: degree || '',
+            department: department || ''
+        },
+        success: function(response) {
+            const result = JSON.parse(response);
+            if (result.success && result.data.length > 0) {
+                let options = '<option value="">All Categories</option>';
+                result.data.forEach(function(category) {
+                    options += `<option value="${category}">${category}</option>`;
+                });
+                $('#perm_category').html(options);
             }
         }
     });
 }
 
 function onCategoryChange() {
-    const category = $('#perm_category').val();
-    
-    if (!category) {
-        $('#permissionsCheckboxes').hide();
-        return;
-    }
-    
-    // Load current permissions
+    // Update permissions based on current filters
+    updatePermissionsDisplay();
+}
+
+function updatePermissionsDisplay() {
     const enterpriseId = $('#perm_enterprise').val();
     const degree = $('#perm_degree').val();
     const department = $('#perm_department').val();
     const graduationYear = $('#perm_graduation_year').val();
+    const category = $('#perm_category').val();
     
+    if (!enterpriseId) {
+        $('#permissionsCheckboxes').hide();
+        return;
+    }
+    
+    // Load permissions based on current filters
     $.ajax({
         url: '',
         type: 'POST',
         data: {
-            action: 'get_current_permissions',
+            action: 'get_filtered_permissions',
             enterprise_id: enterpriseId,
-            degree: degree,
-            department: department,
-            graduation_year: graduationYear,
-            category: category
+            degree: degree || '',
+            department: department || '',
+            graduation_year: graduationYear || '',
+            category: category || ''
         },
         success: function(response) {
             const result = JSON.parse(response);
             if (result.success) {
                 const perms = result.data;
                 
-                // Set checkbox values
+                // Set checkbox values based on average permissions
                 $('#perm_is_course').prop('checked', perms.is_course == 1);
                 $('#perm_is_books').prop('checked', perms.is_books == 1);
                 $('#perm_is_listening').prop('checked', perms.is_listening == 1);
@@ -2333,8 +2983,23 @@ function onCategoryChange() {
                     </div>
                 `);
                 
-                // Show permissions checkboxes
+                // Always show permissions checkboxes when enterprise is selected
                 $('#permissionsCheckboxes').show();
+            } else {
+                // If no users found, still show checkboxes but with default unchecked state
+                $('#perm_is_course, #perm_is_books, #perm_is_listening, #perm_is_phrases, #perm_is_speaking, #perm_is_reading, #perm_is_videos').prop('checked', false);
+                $('#affectedUsersCount').html(`
+                    <div class="alert alert-info">
+                        <i class="ti ti-info-circle me-2"></i>
+                        No users found matching the selected criteria.
+                    </div>
+                `);
+                $('#permissionsCheckboxes').show();
+            }
+        },
+        error: function() {
+            if (typeof toastr !== 'undefined') {
+                toastr.error('Error loading permissions');
             }
         }
     });

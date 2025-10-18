@@ -83,20 +83,56 @@ $inProgressUsers = 0;
 
 // ---------- User Registration Trends (Last 12 Months) ----------
 $registrationMonths = [];
-$registrationCounts = [];
+$regularUserCounts = [];
+$enterpriseUserCounts = [];
+
 if ($conn->query("SHOW TABLES LIKE 'users'")->num_rows > 0) {
-    $userRegistrations = $conn->query("
+    // Get regular users registration data
+    $regularUserRegistrations = $conn->query("
         SELECT 
             DATE_FORMAT(created_at, '%Y-%m') AS month,
             COUNT(*) as total
         FROM users 
         WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+        AND (user_role = 'user' OR user_role IS NULL OR user_role = '')
         GROUP BY DATE_FORMAT(created_at, '%Y-%m')
         ORDER BY month ASC
     ");
-    while ($row = $userRegistrations->fetch_assoc()) {
-        $registrationMonths[] = date('M Y', strtotime($row['month'] . '-01'));
-        $registrationCounts[] = $row['total'];
+    
+    // Get enterprise users registration data
+    $enterpriseUserRegistrations = $conn->query("
+        SELECT 
+            DATE_FORMAT(created_at, '%Y-%m') AS month,
+            COUNT(*) as total
+        FROM users 
+        WHERE created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+        AND user_role = 'enterprise'
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+        ORDER BY month ASC
+    ");
+    
+    // Create arrays to store data for both user types
+    $regularUserData = [];
+    $enterpriseUserData = [];
+    
+    // Process regular users data
+    while ($row = $regularUserRegistrations->fetch_assoc()) {
+        $regularUserData[$row['month']] = $row['total'];
+    }
+    
+    // Process enterprise users data
+    while ($row = $enterpriseUserRegistrations->fetch_assoc()) {
+        $enterpriseUserData[$row['month']] = $row['total'];
+    }
+    
+    // Get all months in the last 12 months to ensure consistent data
+    for ($i = 11; $i >= 0; $i--) {
+        $month = date('Y-m', strtotime("-$i months"));
+        $monthLabel = date('M Y', strtotime($month . '-01'));
+        
+        $registrationMonths[] = $monthLabel;
+        $regularUserCounts[] = isset($regularUserData[$month]) ? (int)$regularUserData[$month] : 0;
+        $enterpriseUserCounts[] = isset($enterpriseUserData[$month]) ? (int)$enterpriseUserData[$month] : 0;
     }
 }
 
@@ -383,13 +419,19 @@ var userRegistrationOptions = {
     chart: { 
         type: 'line', 
         height: 350, 
-        toolbar: { show: true },
+        toolbar: { show: false },
         zoom: { enabled: true }
     },
-    series: [{ 
-        name: 'New Users', 
-        data: <?= json_encode($registrationCounts) ?> 
-    }],
+    series: [
+        { 
+            name: 'Regular Users', 
+            data: <?= json_encode($regularUserCounts) ?> 
+        },
+        { 
+            name: 'Enterprise Users', 
+            data: <?= json_encode($enterpriseUserCounts) ?> 
+        }
+    ],
     xaxis: { 
         categories: <?= json_encode($registrationMonths) ?>,
         title: { text: 'Month' }
@@ -399,8 +441,12 @@ var userRegistrationOptions = {
     },
     stroke: { curve: 'smooth', width: 3 },
     dataLabels: { enabled: false },
-    colors: ['#008FFB'],
-    grid: { borderColor: '#f1f1f1' }
+    colors: ['#008FFB', '#28a745'],
+    grid: { borderColor: '#f1f1f1' },
+    legend: {
+        position: 'top',
+        horizontalAlign: 'right'
+    }
 };
 new ApexCharts(document.querySelector("#userRegistrationChart"), userRegistrationOptions).render();
 

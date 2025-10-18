@@ -763,40 +763,36 @@ function handleAudioUpload($fieldName, $subFolder) {
 </div>
 
 
-<!-- Manage Lessons Modal -->
-<div class="modal fade" id="manageLessonsModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title">
-                    <i class="ri-book-line"></i> Manage Lessons - <span id="lessonSubcategoryName"></span>
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="current_subcategory_id">
-                
-                <button class="btn btn-sm btn-primary mb-3" onclick="showAddLessonModal()">
-                    <i class="ri-add-line"></i> Add Lesson
-                </button>
-                
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Phrase Title</th>
-                                <th>Meaning</th>
-                                <th>Audio</th>
-                                <th>Image</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="lessonsTableBody"></tbody>
-                    </table>
-                </div>
-            </div>
+<!-- Manage Lessons Off-canvas -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="manageLessonsOffcanvas" style="width: 50%; max-width: 1200px;">
+    <div class="offcanvas-header bg-primary text-white">
+        <h5 class="offcanvas-title">
+            <i class="ri-book-line"></i> Manage Lessons - <span id="lessonSubcategoryName"></span>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+        <input type="hidden" id="current_subcategory_id">
+        
+        <button class="btn btn-sm btn-primary mb-3" onclick="showAddLessonModal()">
+            <i class="ri-add-line"></i> Add Lesson
+        </button>
+        
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Phrase Title</th>
+                        <th>Meaning</th>
+                        <th>Audio</th>
+                        <th>Image</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="lessonsTableBody"></tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -882,10 +878,7 @@ function handleAudioUpload($fieldName, $subFolder) {
         </div>
     </div>
 </div>
-
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+ 
 <script>
 let mainPhrasesTable;
 let subcategoriesTable;
@@ -1133,7 +1126,10 @@ function manageLessons(subcategoryId, subcategoryTitle) {
     $('#lessonSubcategoryName').text(subcategoryTitle);
     
     loadLessons(subcategoryId);
-    $('#manageLessonsModal').modal('show');
+    
+    // Show off-canvas instead of modal
+    const offcanvas = new bootstrap.Offcanvas(document.getElementById('manageLessonsOffcanvas'));
+    offcanvas.show();
 }
 
 function loadLessons(subcategoryId) {

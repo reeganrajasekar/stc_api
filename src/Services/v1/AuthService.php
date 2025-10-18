@@ -87,7 +87,7 @@ class AuthService
     {
         try {
             // Fetch latest OTP entry for the mobile number
-            $sql = "SELECT u.id, om.otp 
+            $sql = "SELECT u.id, u.user_role, om.otp 
                     FROM users u
                     JOIN otp_mobile om ON u.mobile_number = om.mobile_number
                     WHERE u.mobile_number = :mobile_number AND u.is_active = 1 AND om.is_deleted = 0
@@ -122,13 +122,16 @@ class AuthService
             $accessExpireAt  = $issuedAt + (2 * 60 * 60);         // 2 hours = 7200 seconds
             $refreshExpireAt = $issuedAt + (365 * 24 * 60 * 60);  // 365 days = 31,536,000 seconds
 
+            // Determine user role for JWT token
+            $jwtRole = ($row['user_role'] === 'enterprise') ? 'enterprise' : 'user';
+
             $accessPayload = [
                 'iat' => $issuedAt,
                 'iss' => $_ENV['JWT_ISSUER'],
                 'nbf' => $issuedAt,
                 'exp' => $accessExpireAt,
                 'id' => $row['id'],
-                'role' => 'user',
+                'role' => $jwtRole,
             ];
 
             $refreshPayload = [
@@ -333,7 +336,7 @@ class AuthService
     public function login(array $data): Response
     {
         try {
-            $sql = "SELECT id,full_name,email,mobile_number,password_hash 
+            $sql = "SELECT id,full_name,email,mobile_number,password_hash,user_role 
                     FROM users 
                     WHERE (email = :email OR mobile_number = :email) AND is_active = 1;";
             $stmt = $this->db->prepare($sql);
@@ -358,13 +361,16 @@ class AuthService
                 $accessExpireAt  = $issuedAt + (2 * 60 * 60);         // 2 hours = 7200 seconds
                 $refreshExpireAt = $issuedAt + (365 * 24 * 60 * 60);  // 365 days = 31,536,000 seconds
 
+                // Determine user role for JWT token
+                $jwtRole = ($user['user_role'] === 'enterprise') ? 'enterprise' : 'user';
+
                 $accessPayload = [
                     'iat' => $issuedAt,
                     'iss' => $_ENV['JWT_ISSUER'],
                     'nbf' => $issuedAt,
                     'exp' => $accessExpireAt,
                     'id' => $user['id'],
-                    'role' => 'user',
+                    'role' => $jwtRole,
                 ];
 
                 $refreshPayload = [
@@ -402,9 +408,23 @@ class AuthService
     public function refreshToken(object $token): Response
     {
         try {
+            // Get user role from database
+            $sql = "SELECT user_role FROM users WHERE id = :id AND is_active = 1;";
+            $stmt = $this->db->prepare($sql);
+            $stmt->bindValue(':id', (int)$token->id, PDO::PARAM_INT);
+            $stmt->execute();
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$user) {
+                return Helper::jsonResponse("User not found", 404);
+            }
+
             $issuedAt = time();
             $accessExpireAt  = $issuedAt + (2 * 60 * 60);         // 2 hours = 7200 seconds
             $refreshExpireAt = $issuedAt + (365 * 24 * 60 * 60);  // 365 days = 31,536,000 seconds
+
+            // Determine user role for JWT token
+            $jwtRole = ($user['user_role'] === 'enterprise') ? 'enterprise' : 'user';
 
             $accessPayload = [
                 'iat' => $issuedAt,
@@ -412,7 +432,7 @@ class AuthService
                 'nbf' => $issuedAt,
                 'exp' => $accessExpireAt,
                 'id' => $token->id,
-                'role' => 'user',
+                'role' => $jwtRole,
             ];
 
             $refreshPayload = [
@@ -515,14 +535,14 @@ class AuthService
             $googleUser = \Utils\GoogleAuth::verifyGoogleToken($data['id_token']);
             
       
-            if ($googleUser) {
+            if (!$googleUser) {
                 $this->db->rollBack();
-                return Helper::jsonResponse($googleUser , 401);
+                return Helper::jsonResponse("Invalid Google token", 401);
             }
  
-            $sql = "SELECT id, full_name, email, mobile_number, google_uid, auth_provider, password_hash, profile_picture 
+            $sql = "SELECT id, full_name, email, mobile_number, google_uid, auth_provider, password_hash, profile_picture, user_role 
                     FROM users 
-                    WHERE (email = :email OR google_uid = :google_uid) AND is_active = 0;";
+                    WHERE (email = :email OR google_uid = :google_uid) AND is_active = 1;";
             $stmt = $this->db->prepare($sql);
             $stmt->bindValue(':email', (string)$googleUser['email'], PDO::PARAM_STR);
             $stmt->bindValue(':google_uid', (string)$googleUser['google_id'], PDO::PARAM_STR);
@@ -566,6 +586,7 @@ class AuthService
                 $user['google_uid'] = $googleUser['google_id'];
                 $user['auth_provider'] = 'google';
                 $user['profile_picture'] = $googleUser['picture'] ?: $user['profile_picture'];
+                $user['user_role'] = $user['user_role']; // Keep existing role
                 
             } else {
                 // Check if email exists with different auth provider
@@ -612,7 +633,8 @@ class AuthService
                     'auth_provider' => 'google',
                     'profile_picture' => $googleUser['picture'] ?? '',
                     'is_email_verified' => 1,
-                    'is_mobile_verified' => 0
+                    'is_mobile_verified' => 0,
+                    'user_role' => 'user' // Default role for new users
                 ];
             }
 
@@ -621,13 +643,16 @@ class AuthService
             $accessExpireAt = $issuedAt + (2 * 60 * 60);         // 2 hours
             $refreshExpireAt = $issuedAt + (365 * 24 * 60 * 60); // 365 days
 
+            // Determine user role for JWT token
+            $jwtRole = ($user['user_role'] === 'enterprise') ? 'enterprise' : 'user';
+
             $accessPayload = [
                 'iat' => $issuedAt,
                 'iss' => $_ENV['JWT_ISSUER'],
                 'nbf' => $issuedAt,
                 'exp' => $accessExpireAt,
                 'id' => $user['id'],
-                'role' => 'user',
+                'role' => $jwtRole,
             ];
 
             $refreshPayload = [
@@ -871,5 +896,5 @@ class AuthService
     }
 
 
-}  
+}
    

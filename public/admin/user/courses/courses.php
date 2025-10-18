@@ -2023,47 +2023,43 @@ function getAssessmentQuestion($conn) {
         </div>
     </div>
 
-    <!-- Manage Quizzes Modal -->
-    <div class="modal fade" id="manageQuizzesModal" tabindex="-1" aria-labelledby="manageQuizzesModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header bg-warning text-dark">
-                    <h5 class="modal-title" id="manageQuizzesModalLabel">
-                        <i class="ri-questionnaire-line"></i> Manage Quizzes - <span id="quizzesCourseName"></span>
-                    </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <!-- Manage Quizzes Offcanvas -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="manageQuizzesModal" aria-labelledby="manageQuizzesModalLabel" style="width: 50%; max-width: 1200px;">
+        <div class="offcanvas-header bg-light border-bottom">
+            <h5 class="offcanvas-title text-dark" id="manageQuizzesModalLabel">
+                <i class="ri-questionnaire-line"></i> Manage Quizzes - <span id="quizzesCourseName"></span>
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <input type="hidden" id="current_quiz_course_id">
+            
+            <!-- Action Buttons -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-primary" onclick="showAddQuizModal()">
+                        <i class="ri-add-line"></i> Add Quiz
+                    </button>
                 </div>
-                <div class="modal-body">
-                    <input type="hidden" id="current_quiz_course_id">
-                    
-                    <!-- Action Buttons -->
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-primary" onclick="showAddQuizModal()">
-                                <i class="ri-add-line"></i> Add Quiz
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Quizzes List -->
-                    <div id="quizzesList" class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th width="5%">ID</th>
-                                    <th width="25%">Quiz Name</th>
-                                    <th width="30%">Description</th>
-                                    <th width="10%">Image</th>
-                                    <th width="10%">Status</th>
-                                    <th width="20%">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="quizzesTableBody">
-                                <!-- Quizzes will be loaded here -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+            </div>
+            
+            <!-- Quizzes List -->
+            <div id="quizzesList" class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th width="5%">ID</th>
+                            <th width="25%">Quiz Name</th>
+                            <th width="30%">Description</th>
+                            <th width="10%">Image</th>
+                            <th width="10%">Status</th>
+                            <th width="20%">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quizzesTableBody">
+                        <!-- Quizzes will be loaded here -->
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -2078,7 +2074,7 @@ function getAssessmentQuestion($conn) {
                     <h5 class="modal-title" id="manageQuizQuestionsModalLabel">
                         <i class="ri-question-line"></i> Manage Questions - <span id="quizQuestionsName"></span>
                     </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="current_quiz_id">
@@ -2382,46 +2378,42 @@ function getAssessmentQuestion($conn) {
         </div>
     </div>
 
-    <!-- Manage Assessments Modal -->
-    <div class="modal fade" id="manageAssessmentsModal" tabindex="-1" aria-labelledby="manageAssessmentsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header bg-success text-white">
-                    <h5 class="modal-title" id="manageAssessmentsModalLabel">
-                        <i class="ri-file-list-3-line"></i> Manage Assessments
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+    <!-- Manage Assessments Offcanvas -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="manageAssessmentsModal" aria-labelledby="manageAssessmentsModalLabel" style="width: 50%; max-width: 1200px;">
+        <div class="offcanvas-header bg-primary text-white border-bottom">
+            <h5 class="offcanvas-title" id="manageAssessmentsModalLabel">
+                <i class="ri-file-list-3-line"></i> Manage Assessments
+            </h5>
+            <button type="button" class="btn-close " data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <!-- Action Buttons -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-primary" onclick="showAddAssessmentModal()">
+                        <i class="ri-add-line"></i> Add Assessment
+                    </button>
                 </div>
-                <div class="modal-body">
-                    <!-- Action Buttons -->
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-primary" onclick="showAddAssessmentModal()">
-                                <i class="ri-add-line"></i> Add Assessment
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Assessments List -->
-                    <div id="assessmentsList" class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th width="5%">ID</th>
-                                    <th width="25%">Assessment Name</th>
-                                    <th width="20%">Description</th>
-                                    <th width="10%">Level</th>
-                                    <th width="10%">Image</th>
-                                    <th width="10%">Status</th>
-                                    <th width="20%">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="assessmentsTableBody">
-                                <!-- Assessments will be loaded here -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+            </div>
+            
+            <!-- Assessments List -->
+            <div id="assessmentsList" class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th width="5%">ID</th>
+                            <th width="25%">Assessment Name</th>
+                            <th width="20%">Description</th>
+                            <th width="10%">Level</th>
+                            <th width="10%">Image</th>
+                            <th width="10%">Status</th>
+                            <th width="20%">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="assessmentsTableBody">
+                        <!-- Assessments will be loaded here -->
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -2505,7 +2497,7 @@ function getAssessmentQuestion($conn) {
     <div class="modal fade" id="manageAssessmentQuestionsModal" tabindex="-1" aria-labelledby="manageAssessmentQuestionsModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
-                <div class="modal-header bg-info text-white">
+                <div class="modal-header text-white">
                     <h5 class="modal-title" id="manageAssessmentQuestionsModalLabel">
                         <i class="ri-question-line"></i> Manage Questions - <span id="assessmentQuestionsName"></span>
                     </h5>
@@ -2866,10 +2858,7 @@ function getAssessmentQuestion($conn) {
             z-index: 1060 !important;
         }
     </style>
-
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+ 
     <script>
         let coursesTable;
         let categoriesDataTable;
@@ -3742,7 +3731,7 @@ function getAssessmentQuestion($conn) {
                                     <button class="btn btn-sm btn-secondary me-1" onclick="duplicateCourse(${row.course_id})" title="Duplicate">
                                         <i class="ri-file-copy-line"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-delete me-1" onclick="deleteCourse(${row.course_id})" title="Delete">
+                                    <button class="btn btn-sm btn-danger me-1" onclick="deleteCourse(${row.course_id})" title="Delete">
                                         <i class="ri-delete-bin-line"></i>
                                     </button> 
                             `;
@@ -4002,7 +3991,7 @@ function getAssessmentQuestion($conn) {
             $('#manageAssessmentsModalLabel').html(`<i class="ri-file-list-3-line"></i> Manage Assessments - ${courseName} (${courseLevel})`);
             
             loadAssessments(courseId);
-            $('#manageAssessmentsModal').modal('show');
+            $('#manageAssessmentsModal').offcanvas('show');
         }
 
         function loadAssessments(courseId) {
@@ -4547,7 +4536,7 @@ function getAssessmentQuestion($conn) {
             $('#quizzesCourseName').text(courseName);
             
             loadQuizzes(courseId);
-            $('#manageQuizzesModal').modal('show');
+            $('#manageQuizzesModal').offcanvas('show');
         }
 
         function loadQuizzes(courseId) {
